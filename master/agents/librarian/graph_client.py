@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import re
+
 from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession
 
+from master.agents.librarian.access_control import NodeType, RelationType
 from master.core.config import get_settings
 from master.core.exceptions import NodeNotFoundError
 from master.core.logging import get_logger
@@ -44,6 +47,19 @@ class GraphClient:
     async def close(self) -> None:
         await self._driver.close()
 
+    def _validate_identifier(self, value: str, allowed_enum: type[NodeType | RelationType]) -> None:
+        """
+        Validate that a Cypher identifier (label or relationship type) is safe.
+        Must be alphanumeric and present in the provided allow-list enum.
+        """
+        if not re.match(r"^[a-zA-Z0-9_]+$", value):
+            log.error("graph.security.invalid_identifier", value=value)
+            raise ValueError(f"Invalid characters in identifier: {value}")
+
+        if value not in {item.value for item in allowed_enum}:
+            log.error("graph.security.unauthorized_identifier", value=value)
+            raise ValueError(f"Unauthorized graph identifier: {value}")
+
     # ── Node CRUD ────────────────────────────────────────────────────────────
 
     async def upsert_node(self, node_type: str, node_id: str, attributes: dict[str, Any]) -> None:
@@ -51,6 +67,7 @@ class GraphClient:
         Create or update a node of the given type.
         Uses MERGE on id property. All attribute keys are set atomically.
         """
+        self._validate_identifier(node_type, NodeType)
         with tracer.start_as_current_span("neo4j.upsert_node"):
             async with self._driver.session() as session:
                 await session.run(
@@ -100,6 +117,7 @@ class GraphClient:
         attributes: dict[str, Any] | None = None,
     ) -> None:
         """Upsert a temporal edge between two nodes."""
+        self._validate_identifier(relation, RelationType)
         with tracer.start_as_current_span("neo4j.upsert_edge"):
             async with self._driver.session() as session:
                 await session.run(
@@ -136,8 +154,9 @@ class GraphClient:
         with tracer.start_as_current_span("neo4j.vector_search"):
             type_filter = ""
             if node_types:
-                labels = "|".join(node_types)
-                type_filter = f"WHERE any(label in labels(n) WHERE label IN [{', '.join(repr(t) for t in node_types)}])"
+                for t in node_types:
+                    self._validate_identifier(t, NodeType)
+                type_filter = "WHERE any(label in labels(n) WHERE label IN $node_types)"
 
             async with self._driver.session() as session:
                 result = await session.run(
@@ -151,6 +170,7 @@ class GraphClient:
                     """,
                     k=k,
                     embedding=embedding,
+                    node_types=node_types,
                 )
                 records = await result.data()
                 return [{"node": dict(r["n"]), "score": r["score"]} for r in records]
