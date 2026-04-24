@@ -70,8 +70,7 @@ class PIIScanner:
         (
             PIICategory.PHONE,
             re.compile(
-                r"\b(?:\+?1[\s\-.]?)?"
-                r"(?:\(\d{3}\)|\d{3})[\s\-.]?\d{3}[\s\-.]?\d{4}\b"
+                r"(?<!\d)(?:\+?1[\s\-.]?)?(?:\(\d{3}\)|\d{3})[\s\-.]?\d{3}[\s\-.]?\d{4}(?!\d)"
             ),
         ),
         (
@@ -134,7 +133,6 @@ class PIIScanner:
 
         # ── NER scan ────────────────────────────────────────────────────────
         if self._use_ner and self._nlp is not None:
-            import spacy  # type: ignore[import]
 
             doc = self._nlp(text)  # type: ignore[call-arg]
             ner_label_map = {

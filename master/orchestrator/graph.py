@@ -197,10 +197,14 @@ async def error_sink_node(state: OrchestratorState) -> dict[str, Any]:
 # ── Routing Functions ─────────────────────────────────────────────────────────
 
 def _should_hitl(state: OrchestratorState) -> str:
-    """After execute: route to hitl if escalation needed, else synthesize."""
+    """After execute: route to hitl if escalation needed, error_sink if failed, else synthesize."""
     response = state.get("agent_response")
-    if response and response.status == "escalate":
+    if not response:
+        return "error_sink"
+    if response.status == "escalate":
         return "hitl"
+    if response.status == "error":
+        return "error_sink"
     return "synthesize"
 
 
@@ -211,11 +215,14 @@ def _hitl_approved(state: OrchestratorState) -> str:
 
 # ── Graph Construction ────────────────────────────────────────────────────────
 
-def build_graph() -> StateGraph:
+
+def build_graph() -> Any:
     """
     Build and compile the Lucifer orchestration graph.
     Returns a compiled StateGraph ready for invocation.
     """
+    from langgraph.checkpoint.memory import MemorySaver # Note: Phase 1 Week 5-6 switch to AsyncPostgresSaver
+
     graph = StateGraph(OrchestratorState)
 
     # Register nodes
@@ -237,7 +244,7 @@ def build_graph() -> StateGraph:
     graph.add_edge("route", "execute")
 
     # Conditional: execute → hitl or synthesize
-    graph.add_conditional_edges("execute", _should_hitl, {"hitl": "hitl", "synthesize": "synthesize"})
+    graph.add_conditional_edges("execute", _should_hitl, {"hitl": "hitl", "synthesize": "synthesize", "error_sink": "error_sink"})
 
     # Conditional: hitl → synthesize or error_sink
     graph.add_conditional_edges("hitl", _hitl_approved, {"synthesize": "synthesize", "error_sink": "error_sink"})
@@ -247,7 +254,7 @@ def build_graph() -> StateGraph:
     graph.add_edge("memory_write", END)
     graph.add_edge("error_sink", END)
 
-    return graph
+    return graph.compile(checkpointer=MemorySaver())
 
 
 def _simple_intent_classifier(raw_input: str) -> tuple[str, str, RiskTier]:

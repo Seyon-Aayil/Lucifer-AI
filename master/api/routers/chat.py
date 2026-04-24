@@ -14,14 +14,12 @@ import asyncio
 import json
 import time
 import uuid
-from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 
 from master.agents.base.agent import AgentSurface
 from master.api.middleware.pii_scanner import PIIScanner
-from master.api.schemas import ChatRequest, ChatResponse, ChatChunk, Surface, TokenUsageSchema
+from master.api.schemas import ChatChunk, ChatRequest, ChatResponse, Surface, TokenUsageSchema
 from master.core.exceptions import PIIDetectedError
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
@@ -34,7 +32,7 @@ tracer = get_tracer(__name__)
 
 # Shared instances (initialised once per worker process)
 _pii_scanner = PIIScanner(use_ner=False)  # NER enabled in prod via config
-_graph = build_graph().compile()
+_graph = build_graph()
 
 _SURFACE_MAP: dict[Surface, AgentSurface] = {
     Surface.WATCH: AgentSurface.WATCH,
@@ -46,15 +44,20 @@ _SURFACE_MAP: dict[Surface, AgentSurface] = {
 }
 
 
-def _check_pii(message: str, allow_pii: bool) -> None:
+async def _check_pii(message: str, allow_pii: bool) -> None:
     """Raise PIIDetectedError if message contains PII and allow_pii is False."""
     if not allow_pii:
-        _pii_scanner.scan_or_raise(message, context="chat.message")
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _pii_scanner.scan_or_raise, message, "chat.message")
+
+
+from typing import Any
 
 
 async def _run_graph(state: OrchestratorState) -> OrchestratorState:
     """Run the LangGraph orchestrator and return final state."""
-    result: OrchestratorState = await _graph.ainvoke(state)  # type: ignore[arg-type]
+    config: dict[str, Any] = {"configurable": {"thread_id": state.get("task_id", "default")}}
+    result: OrchestratorState = await _graph.ainvoke(state, config=config)  # type: ignore[arg-type,call-overload]
     return result
 
 
@@ -74,7 +77,7 @@ async def chat(
     with tracer.start_as_current_span("api.chat.post"):
         allow_pii = request.headers.get("X-Lucifer-Allow-PII", "false").lower() == "true"
         try:
-            _check_pii(body.message, allow_pii)
+            await _check_pii(body.message, allow_pii)
         except PIIDetectedError as exc:
             from fastapi import HTTPException
             raise HTTPException(status_code=422, detail={"error": "pii_detected", "message": str(exc)})
@@ -167,7 +170,8 @@ async def chat_websocket(websocket: WebSocket) -> None:
 
             try:
                 # Stream graph execution events
-                async for event in _graph.astream_events(initial_state, version="v2"):  # type: ignore[arg-type]
+                config: dict[str, Any] = {"configurable": {"thread_id": task_id}}
+                async for event in _graph.astream_events(initial_state, config=config, version="v2"):  # type: ignore[arg-type,attr-defined]
                     if event["event"] == "on_chain_stream":
                         chunk_data = event.get("data", {}).get("chunk", {})
                         if isinstance(chunk_data, dict):

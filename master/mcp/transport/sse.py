@@ -6,7 +6,6 @@ Connects to Dockerized MCP servers via HTTP POST with streaming response support
 """
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import httpx

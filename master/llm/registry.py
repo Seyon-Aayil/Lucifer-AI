@@ -23,7 +23,7 @@ from typing import Any
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from master.core.config import get_settings
-from master.core.exceptions import NoSuitableProviderError, ProviderError, ProviderUnavailableError
+from master.core.exceptions import NoSuitableProviderError, ProviderError
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
 from master.llm.circuit_breaker import CircuitBreaker
@@ -33,7 +33,6 @@ from master.llm.interfaces import (
     CompletionResponse,
     LLMProvider,
     ProviderTier,
-    StreamChunk,
 )
 
 log = get_logger(__name__)
@@ -65,13 +64,12 @@ class ProviderRegistry:
         self._routellm: Any | None = None
 
     @classmethod
-    def from_settings(cls, extra_providers: list[LLMProvider] | None = None) -> "ProviderRegistry":
+    def from_settings(cls, extra_providers: list[LLMProvider] | None = None) -> ProviderRegistry:
         """
         Factory: build a ProviderRegistry from application settings.
         Registers: Anthropic (opus, sonnet, haiku), OpenAI (gpt-4o, mini),
                    Google (flash, pro), Ollama (llama3).
         """
-        from master.core.config import get_settings
         from master.llm.providers.anthropic import AnthropicProvider
 
         settings = get_settings()
@@ -89,6 +87,37 @@ class ProviderRegistry:
 
         # OpenAI, Google, Ollama adapters follow the same pattern (Phase 1 TODO)
         # Add them here as their adapters are implemented.
+        from master.llm.providers.google import GoogleProvider
+        from master.llm.providers.ollama import OllamaProvider
+        from master.llm.providers.openai import OpenAIProvider
+
+        if settings.openai_api_key:
+            for model in ("gpt-4o", "gpt-4o-mini"):
+                providers.append(
+                    OpenAIProvider(
+                        model=model,
+                        litellm_proxy_url=settings.litellm_proxy_url,
+                        litellm_api_key=settings.litellm_master_key,
+                    )
+                )
+
+        if settings.google_api_key:
+            for model in ("gemini-1.5-pro", "gemini-1.5-flash"):
+                providers.append(
+                    GoogleProvider(
+                        model=model,
+                        litellm_proxy_url=settings.litellm_proxy_url,
+                        litellm_api_key=settings.litellm_master_key,
+                    )
+                )
+
+        if settings.ollama_base_url:
+            providers.append(
+                OllamaProvider(
+                    model="llama3",
+                    ollama_base_url=settings.ollama_base_url,
+                )
+            )
 
         if extra_providers:
             providers.extend(extra_providers)

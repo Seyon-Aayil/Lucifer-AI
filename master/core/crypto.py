@@ -14,7 +14,6 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-
 # ── Argon2id Configuration (OWASP 2024 minimum) ──────────────────────────────
 _ARGON2 = PasswordHasher(
     time_cost=3,        # iterations

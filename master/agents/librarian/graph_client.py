@@ -33,7 +33,7 @@ class GraphClient:
         self._driver = driver
 
     @classmethod
-    def from_settings(cls) -> "GraphClient":
+    def from_settings(cls) -> GraphClient:
         """Factory: create from application settings."""
         s = get_settings()
         driver = AsyncGraphDatabase.driver(

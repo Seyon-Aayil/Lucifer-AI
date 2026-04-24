@@ -7,18 +7,18 @@ cleanly on shutdown. All routers registered here.
 """
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 import nats
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
+from master.api.routers import auth, chat, health
 from master.core.config import get_settings
 from master.core.logging import get_logger, setup_logging
 from master.core.telemetry import setup_telemetry
-from master.api.routers import chat, health, auth
 
 log = get_logger(__name__)
 

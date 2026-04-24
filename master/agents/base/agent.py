@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncIterator, Literal
+from typing import Any, Literal
 
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
@@ -86,7 +87,7 @@ class TokenBudget:
     allow_compression: bool = True
 
     @classmethod
-    def for_surface(cls, surface: AgentSurface) -> "TokenBudget":
+    def for_surface(cls, surface: AgentSurface) -> TokenBudget:
         """Return appropriate budget limits based on the calling surface."""
         budgets: dict[AgentSurface, tuple[int, int, float]] = {
             AgentSurface.WATCH:   (512,   128,   0.001),
@@ -146,7 +147,7 @@ class AgentRequest:
         context_package: ContextPackage,
         risk_tier: RiskTier = RiskTier.LOW,
         trace_id: str | None = None,
-    ) -> "AgentRequest":
+    ) -> AgentRequest:
         """Convenience factory for tests and the orchestrator."""
         return cls(
             task_id=str(uuid.uuid4()),

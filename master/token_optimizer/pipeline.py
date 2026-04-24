@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Any
 
 from master.agents.base.agent import TokenBudget
 from master.core.exceptions import TokenBudgetExceededError
@@ -88,6 +87,7 @@ class TokenOptimizer:
         prompt: str,
         chunks: list[ContextChunk],
         budget: TokenBudget,
+        device_id: str = "unknown",
     ) -> PreparedContext:
         """
         Run all optimization stages. Returns a PreparedContext ready for dispatch.
@@ -98,7 +98,7 @@ class TokenOptimizer:
 
         # ── Stage 1: Semantic Cache ───────────────────────────────────────────
         combined_prompt = prompt + "\n".join(c.text for c in chunks[:3])  # key on prompt + top ctx
-        cached = await self._cache.get(combined_prompt)
+        cached = await self._cache.get(device_id, combined_prompt)
         if cached:
             log.info("token_optimizer.cache_hit", prompt_len=len(prompt))
             return PreparedContext(chunks=[], cache_hit=True, cached_response=cached, stages_applied=["cache"])

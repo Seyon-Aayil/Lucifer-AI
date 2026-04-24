@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import pytest_asyncio
 
 # Force test environment before any app code is imported
 os.environ.setdefault("APP_ENV", "test")

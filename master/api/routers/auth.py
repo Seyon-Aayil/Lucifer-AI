@@ -11,7 +11,6 @@ Device records persisted in `devices` table. Refresh token hashes in `refresh_to
 """
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime, timedelta
 
 import asyncpg
@@ -23,11 +22,9 @@ from master.core.auth.jwt import (
     create_access_token,
     create_refresh_token,
     hash_refresh_token,
-    validate_access_token,
 )
 from master.core.auth.revocation import RevocationStore
 from master.core.config import get_settings
-from master.core.exceptions import AuthError, DeviceRevokedError, TokenExpiredError
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
 
