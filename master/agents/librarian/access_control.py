@@ -31,6 +31,19 @@ class NodeType(str, Enum):
     NEWS = "News"
 
 
+class RelationType(str, Enum):
+    WORKS_WITH = "WORKS_WITH"
+    AUTHORED = "AUTHORED"
+    ABOUT = "ABOUT"
+    MEMBER_OF = "MEMBER_OF"
+    LIVES_AT = "LIVES_AT"
+    HAPPENED_AT = "HAPPENED_AT"
+    PART_OF = "PART_OF"
+    RELATED_TO = "RELATED_TO"
+    FOLLOWS = "FOLLOWS"
+    MENTIONS = "MENTIONS"
+
+
 # ── ACL Matrix ────────────────────────────────────────────────────────────────
 # Format: agent_id_prefix → {node_type → set of allowed operations}
 # "read:*" means read all fields; "read:name" means only specific fields (advisory)
