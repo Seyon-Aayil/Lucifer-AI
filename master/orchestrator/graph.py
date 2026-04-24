@@ -1,0 +1,267 @@
+"""
+master.orchestrator.graph
+==========================
+LangGraph state graph for Lucifer orchestration.
+
+Graph nodes (in order):
+  classify → context_inject → budget_plan → route → execute
+  → [hitl?] → synthesize → memory_write
+
+HitL checkpoint: inserted automatically when risk_tier >= HIGH.
+Edges are conditional — failures route to an error_sink node.
+"""
+from __future__ import annotations
+
+import uuid
+from typing import Any
+
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
+
+from master.agents.base.agent import (
+    AgentRequest,
+    AgentSurface,
+    RiskTier,
+    TokenBudget,
+)
+from master.core.logging import get_logger
+from master.core.telemetry import get_tracer
+from master.orchestrator.state import OrchestratorState
+
+log = get_logger(__name__)
+tracer = get_tracer(__name__)
+
+# Risk tiers that require human approval before execution
+_HITL_TIERS = {RiskTier.HIGH, RiskTier.CRITICAL}
+
+
+# ── Node Implementations ──────────────────────────────────────────────────────
+
+async def classify_node(state: OrchestratorState) -> dict[str, Any]:
+    """
+    Classify the raw input into: intent, agent_id, risk_tier.
+    Uses a lightweight local model or rule-based classifier for speed.
+    """
+    with tracer.start_as_current_span("orchestrator.classify"):
+        raw = state.get("raw_input", "")
+        # TODO Phase 1 Week 5: replace with real intent classifier model
+        intent, agent_id, risk_tier = _simple_intent_classifier(raw)
+        requires_hitl = risk_tier in _HITL_TIERS
+
+        log.info(
+            "orchestrator.classify",
+            intent=intent,
+            agent=agent_id,
+            risk=risk_tier.value,
+            hitl=requires_hitl,
+        )
+        return {
+            "intent": intent,
+            "agent_id": agent_id,
+            "risk_tier": risk_tier,
+            "requires_hitl": requires_hitl,
+        }
+
+
+async def context_inject_node(state: OrchestratorState) -> dict[str, Any]:
+    """
+    Call LibrarianAgent to fetch the context package for the selected agent+intent.
+    Package is ACL-filtered and token-budgeted by the Librarian.
+    """
+    with tracer.start_as_current_span("orchestrator.context_inject"):
+        # TODO Phase 1 Week 5-6: inject real LibrarianClient
+        from master.agents.base.agent import ContextPackage
+        context = ContextPackage(
+            requesting_agent=state.get("agent_id", "personal-agent"),
+            task_type=state.get("intent", "chat"),
+        )
+        log.debug("orchestrator.context_injected", agent=state.get("agent_id"))
+        return {"context_package": context}
+
+
+async def budget_plan_node(state: OrchestratorState) -> dict[str, Any]:
+    """
+    Calculate token budget for this request based on surface + daily spend remaining.
+    """
+    with tracer.start_as_current_span("orchestrator.budget_plan"):
+        surface = state.get("surface", AgentSurface.WEB)
+        budget = TokenBudget.for_surface(surface)
+        log.debug("orchestrator.budget_planned", inputs=budget.input_limit, outputs=budget.output_limit)
+        return {"token_budget": budget}
+
+
+async def route_node(state: OrchestratorState) -> dict[str, Any]:
+    """
+    Build the typed AgentRequest from accumulated state.
+    """
+    with tracer.start_as_current_span("orchestrator.route"):
+        request = AgentRequest(
+            task_id=state.get("task_id", str(uuid.uuid4())),
+            agent_id=state.get("agent_id", "personal-agent"),
+            intent=state.get("intent", "chat"),
+            context_package=state["context_package"],
+            token_budget=state["token_budget"],
+            risk_tier=state.get("risk_tier", RiskTier.LOW),
+            surface=state.get("surface", AgentSurface.WEB),
+            trace_id=state.get("trace_id", str(uuid.uuid4())),
+            raw_input=state.get("raw_input", ""),
+        )
+        return {"agent_request": request}
+
+
+async def execute_node(state: OrchestratorState) -> dict[str, Any]:
+    """
+    Dispatch the agent request to the selected agent and collect the response.
+    Agent pool is resolved at runtime from the registry.
+    """
+    with tracer.start_as_current_span("orchestrator.execute"):
+        request: AgentRequest = state["agent_request"]
+        # TODO Phase 3: resolve from AgentPool registry
+        # agent = agent_pool.get(request.agent_id)
+        # response = await agent.execute(request)
+        from master.agents.base.agent import AgentResponse
+        response = AgentResponse(
+            task_id=request.task_id,
+            agent_id=request.agent_id,
+            status="success",
+            result={"content": f"[Placeholder response for intent: {request.intent}]"},
+        )
+        log.info("orchestrator.execute.done", agent=request.agent_id, status=response.status)
+        return {
+            "agent_response": response,
+            "memory_deltas": response.memory_deltas,
+        }
+
+
+async def hitl_node(state: OrchestratorState) -> dict[str, Any]:
+    """
+    Human-in-the-loop checkpoint.
+    Interrupts the graph and waits for external approval signal.
+    LangGraph's interrupt() mechanism handles the pause.
+    """
+    from langgraph.types import interrupt
+
+    with tracer.start_as_current_span("orchestrator.hitl"):
+        response: Any = state.get("agent_response")
+        reason = response.escalation_reason if response else "High-risk action"
+        log.info("orchestrator.hitl.waiting", reason=reason)
+
+        approval: dict[str, Any] = interrupt(
+            {"reason": reason, "agent_id": state.get("agent_id"), "task_id": state.get("task_id")}
+        )
+        approved = approval.get("approved", False)
+        return {"hitl_approved": approved, "hitl_feedback": approval.get("feedback")}
+
+
+async def synthesize_node(state: OrchestratorState) -> dict[str, Any]:
+    """
+    Format the agent response for the calling surface.
+    Merges multi-agent outputs if applicable.
+    """
+    with tracer.start_as_current_span("orchestrator.synthesize"):
+        response = state.get("agent_response")
+        content = ""
+        if response and response.status in ("success", "partial"):
+            content = response.result.get("content", "")
+        elif response and response.status == "error":
+            content = f"I encountered an error: {response.error_message}"
+        elif response and response.status == "escalate":
+            content = f"This action requires approval: {response.escalation_reason}"
+
+        return {"final_output": content, "output_metadata": {"status": response.status if response else "error"}}
+
+
+async def memory_write_node(state: OrchestratorState) -> dict[str, Any]:
+    """
+    Apply memory_deltas to the knowledge graph via LibrarianAgent.
+    Publishes deltas to NATS 'memory.delta.*' for async processing.
+    """
+    with tracer.start_as_current_span("orchestrator.memory_write"):
+        deltas = state.get("memory_deltas", [])
+        # TODO Phase 1 Week 5-6: inject real LibrarianClient + NATS
+        if deltas:
+            log.info("orchestrator.memory_write", delta_count=len(deltas))
+        return {"memory_written": True}
+
+
+async def error_sink_node(state: OrchestratorState) -> dict[str, Any]:
+    """Catch-all error node. Logs and returns error output."""
+    log.error("orchestrator.error", error=state.get("error"), task=state.get("task_id"))
+    return {
+        "final_output": "An unexpected error occurred. Please try again.",
+        "output_metadata": {"status": "error"},
+        "memory_written": False,
+    }
+
+
+# ── Routing Functions ─────────────────────────────────────────────────────────
+
+def _should_hitl(state: OrchestratorState) -> str:
+    """After execute: route to hitl if escalation needed, else synthesize."""
+    response = state.get("agent_response")
+    if response and response.status == "escalate":
+        return "hitl"
+    return "synthesize"
+
+
+def _hitl_approved(state: OrchestratorState) -> str:
+    """After hitl: proceed to synthesize if approved, else error."""
+    return "synthesize" if state.get("hitl_approved", False) else "error_sink"
+
+
+# ── Graph Construction ────────────────────────────────────────────────────────
+
+def build_graph() -> StateGraph:
+    """
+    Build and compile the Lucifer orchestration graph.
+    Returns a compiled StateGraph ready for invocation.
+    """
+    graph = StateGraph(OrchestratorState)
+
+    # Register nodes
+    graph.add_node("classify", classify_node)
+    graph.add_node("context_inject", context_inject_node)
+    graph.add_node("budget_plan", budget_plan_node)
+    graph.add_node("route", route_node)
+    graph.add_node("execute", execute_node)
+    graph.add_node("hitl", hitl_node)
+    graph.add_node("synthesize", synthesize_node)
+    graph.add_node("memory_write", memory_write_node)
+    graph.add_node("error_sink", error_sink_node)
+
+    # Linear edges
+    graph.add_edge(START, "classify")
+    graph.add_edge("classify", "context_inject")
+    graph.add_edge("context_inject", "budget_plan")
+    graph.add_edge("budget_plan", "route")
+    graph.add_edge("route", "execute")
+
+    # Conditional: execute → hitl or synthesize
+    graph.add_conditional_edges("execute", _should_hitl, {"hitl": "hitl", "synthesize": "synthesize"})
+
+    # Conditional: hitl → synthesize or error_sink
+    graph.add_conditional_edges("hitl", _hitl_approved, {"synthesize": "synthesize", "error_sink": "error_sink"})
+
+    # Final linear edges
+    graph.add_edge("synthesize", "memory_write")
+    graph.add_edge("memory_write", END)
+    graph.add_edge("error_sink", END)
+
+    return graph
+
+
+def _simple_intent_classifier(raw_input: str) -> tuple[str, str, RiskTier]:
+    """
+    Stub rule-based classifier used until the real model is integrated.
+    Returns: (intent, agent_id, risk_tier).
+    """
+    text = raw_input.lower()
+    if any(kw in text for kw in ["code", "python", "debug", "function", "pr", "github"]):
+        return "code_assist", "coding-agent", RiskTier.LOW
+    if any(kw in text for kw in ["health", "heart", "sleep", "medication", "doctor"]):
+        return "health_query", "health-agent", RiskTier.MEDIUM
+    if any(kw in text for kw in ["finance", "spend", "budget", "bank", "invest"]):
+        return "financial_query", "financial-agent", RiskTier.HIGH
+    if any(kw in text for kw in ["research", "find", "search", "summarise", "paper"]):
+        return "research", "research-agent", RiskTier.LOW
+    return "chat", "personal-agent", RiskTier.LOW

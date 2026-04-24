@@ -1,0 +1,284 @@
+# =============================================================================
+# Lucifer AI — MCP Server Registry
+# Defines all MCP server configurations used by agents.
+# Each entry maps to an MCPServerConfig instance loaded at startup.
+# Allowed agents enforce the agent manifest ACL per tool.
+# =============================================================================
+
+servers:
+
+  # ── Gmail ──────────────────────────────────────────────────────────────────
+  - server_id: gmail
+    display_name: Gmail MCP
+    transport: sse
+    auth_method: oauth2
+    docker_image: lucifer/mcp-gmail:latest
+    url: http://localhost:9010
+    allowed_agents:
+      - personal-agent
+    tools:
+      - name: read_emails
+        description: Read recent emails from the user's inbox
+        input_schema:
+          type: object
+          properties:
+            max_results: { type: integer, default: 10 }
+            query: { type: string }
+            label: { type: string }
+          additionalProperties: false
+      - name: search_emails
+        description: Search emails by query string
+        input_schema:
+          type: object
+          required: [query]
+          properties:
+            query: { type: string }
+            max_results: { type: integer, default: 20 }
+          additionalProperties: false
+      - name: compose_draft
+        description: Compose an email draft (does not send)
+        input_schema:
+          type: object
+          required: [to, subject, body]
+          properties:
+            to: { type: array, items: { type: string } }
+            subject: { type: string }
+            body: { type: string }
+            cc: { type: array, items: { type: string } }
+        requires_confirmation: true
+      - name: send_email
+        description: Send an email (requires confirmation)
+        input_schema:
+          type: object
+          required: [draft_id]
+          properties:
+            draft_id: { type: string }
+        requires_confirmation: true
+      - name: apply_label
+        description: Apply a label to an email
+        input_schema:
+          type: object
+          required: [message_id, label]
+          properties:
+            message_id: { type: string }
+            label: { type: string }
+          additionalProperties: false
+
+  # ── Google Calendar ────────────────────────────────────────────────────────
+  - server_id: gcal
+    display_name: Google Calendar MCP
+    transport: sse
+    auth_method: oauth2
+    docker_image: lucifer/mcp-gcal:latest
+    url: http://localhost:9011
+    allowed_agents:
+      - personal-agent
+    tools:
+      - name: list_events
+        description: List upcoming calendar events
+        input_schema:
+          type: object
+          properties:
+            days_ahead: { type: integer, default: 7 }
+            calendar_id: { type: string, default: primary }
+          additionalProperties: false
+      - name: create_event
+        description: Create a new calendar event
+        input_schema:
+          type: object
+          required: [title, start_datetime, end_datetime]
+          properties:
+            title: { type: string }
+            start_datetime: { type: string, format: date-time }
+            end_datetime: { type: string, format: date-time }
+            description: { type: string }
+            location: { type: string }
+            attendees: { type: array, items: { type: string } }
+        requires_confirmation: true
+      - name: find_slot
+        description: Find an available time slot given constraints
+        input_schema:
+          type: object
+          required: [duration_minutes]
+          properties:
+            duration_minutes: { type: integer }
+            preferred_times: { type: array }
+            days_ahead: { type: integer, default: 7 }
+          additionalProperties: false
+      - name: update_event
+        description: Update an existing event
+        input_schema:
+          type: object
+          required: [event_id]
+          properties:
+            event_id: { type: string }
+            title: { type: string }
+            start_datetime: { type: string }
+            end_datetime: { type: string }
+        requires_confirmation: true
+      - name: delete_event
+        description: Delete a calendar event
+        input_schema:
+          type: object
+          required: [event_id]
+          properties:
+            event_id: { type: string }
+        requires_confirmation: true
+
+  # ── Notion ─────────────────────────────────────────────────────────────────
+  - server_id: notion
+    display_name: Notion MCP
+    transport: sse
+    auth_method: oauth2
+    docker_image: lucifer/mcp-notion:latest
+    url: http://localhost:9012
+    allowed_agents:
+      - personal-agent
+      - research-agent
+    tools:
+      - name: search_pages
+        description: Search Notion pages by query
+        input_schema:
+          type: object
+          required: [query]
+          properties:
+            query: { type: string }
+            limit: { type: integer, default: 10 }
+          additionalProperties: false
+      - name: read_page
+        description: Read the full content of a Notion page
+        input_schema:
+          type: object
+          required: [page_id]
+          properties:
+            page_id: { type: string }
+          additionalProperties: false
+      - name: create_page
+        description: Create a new Notion page in a database
+        input_schema:
+          type: object
+          required: [parent_id, title, content]
+          properties:
+            parent_id: { type: string }
+            title: { type: string }
+            content: { type: string }
+            tags: { type: array, items: { type: string } }
+          additionalProperties: false
+      - name: update_block
+        description: Update a block in an existing Notion page
+        input_schema:
+          type: object
+          required: [block_id, content]
+          properties:
+            block_id: { type: string }
+            content: { type: string }
+          additionalProperties: false
+      - name: query_database
+        description: Query a Notion database with filters
+        input_schema:
+          type: object
+          required: [database_id]
+          properties:
+            database_id: { type: string }
+            filter: { type: object }
+            sorts: { type: array }
+            limit: { type: integer, default: 20 }
+          additionalProperties: false
+
+  # ── GitHub ─────────────────────────────────────────────────────────────────
+  - server_id: github
+    display_name: GitHub MCP
+    transport: sse
+    auth_method: api_key
+    docker_image: lucifer/mcp-github:latest
+    url: http://localhost:9013
+    allowed_agents:
+      - coding-agent
+      - research-agent
+    tools:
+      - name: list_prs
+        description: List open pull requests for a repository
+        input_schema:
+          type: object
+          required: [repo]
+          properties:
+            repo: { type: string, description: "owner/repo format" }
+            state: { type: string, enum: [open, closed, all], default: open }
+            limit: { type: integer, default: 20 }
+          additionalProperties: false
+      - name: read_pr
+        description: Read the full diff and comments of a pull request
+        input_schema:
+          type: object
+          required: [repo, pr_number]
+          properties:
+            repo: { type: string }
+            pr_number: { type: integer }
+          additionalProperties: false
+      - name: create_issue
+        description: Create a new GitHub issue
+        input_schema:
+          type: object
+          required: [repo, title, body]
+          properties:
+            repo: { type: string }
+            title: { type: string }
+            body: { type: string }
+            labels: { type: array, items: { type: string } }
+        requires_confirmation: true
+      - name: get_repo_summary
+        description: Get a summary of a repository (README, structure, recent commits)
+        input_schema:
+          type: object
+          required: [repo]
+          properties:
+            repo: { type: string }
+          additionalProperties: false
+      - name: list_workflows
+        description: List GitHub Actions workflow runs
+        input_schema:
+          type: object
+          required: [repo]
+          properties:
+            repo: { type: string }
+            workflow_id: { type: string }
+            limit: { type: integer, default: 10 }
+          additionalProperties: false
+
+  # ── Slack ──────────────────────────────────────────────────────────────────
+  - server_id: slack
+    display_name: Slack MCP
+    transport: sse
+    auth_method: oauth2
+    docker_image: lucifer/mcp-slack:latest
+    url: http://localhost:9014
+    allowed_agents:
+      - personal-agent
+    tools:
+      - name: read_channel
+        description: Read recent messages from a Slack channel
+        input_schema:
+          type: object
+          required: [channel]
+          properties:
+            channel: { type: string }
+            limit: { type: integer, default: 20 }
+          additionalProperties: false
+      - name: send_message
+        description: Send a message to a Slack channel or DM
+        input_schema:
+          type: object
+          required: [channel, text]
+          properties:
+            channel: { type: string }
+            text: { type: string }
+        requires_confirmation: true
+      - name: search_messages
+        description: Search Slack messages by query
+        input_schema:
+          type: object
+          required: [query]
+          properties:
+            query: { type: string }
+            limit: { type: integer, default: 20 }
+          additionalProperties: false

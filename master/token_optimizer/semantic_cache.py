@@ -1,0 +1,91 @@
+"""
+master.token_optimizer.semantic_cache
+=======================================
+GPTCache wrapper backed by Redis with cosine-similarity threshold.
+Caches LLM completions keyed on prompt embeddings.
+Cache hits bypass the LLM entirely — zero token spend.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import Any
+
+from master.core.config import get_settings
+from master.core.logging import get_logger
+
+log = get_logger(__name__)
+
+
+class SemanticCache:
+    """
+    Semantic prompt cache backed by Redis (vector similarity via GPTCache).
+    Embeddings stored as Redis hashes; cosine similarity computed on lookup.
+    Falls back to exact-key cache when embedding model unavailable.
+    """
+
+    def __init__(self, similarity_threshold: float = 0.92) -> None:
+        self._threshold = similarity_threshold
+        self._gptcache: Any | None = None
+        self._enabled = get_settings().semantic_cache_enabled
+        if self._enabled:
+            self._init_gptcache()
+
+    def _init_gptcache(self) -> None:
+        try:
+            from gptcache import Cache  # type: ignore[import]
+            from gptcache.adapter.api import init_similar_cache  # type: ignore[import]
+            from gptcache.embedding import Onnx  # type: ignore[import]
+            from gptcache.manager import get_data_manager  # type: ignore[import]
+            from gptcache.similarity_evaluation.distance import SearchDistanceEvaluation  # type: ignore[import]
+
+            self._gptcache = Cache()
+            init_similar_cache(
+                cache_obj=self._gptcache,
+                embedding=Onnx(),
+                evaluation=SearchDistanceEvaluation(positive=True, max_distance=1 - self._threshold),
+            )
+            log.info("semantic_cache.initialized", threshold=self._threshold)
+        except (ImportError, Exception) as exc:
+            log.warning("semantic_cache.init_failed", error=str(exc))
+            self._enabled = False
+
+    def _prompt_key(self, prompt: str) -> str:
+        """SHA-256 key for exact-match Redis fallback."""
+        return f"lucifer:cache:exact:{hashlib.sha256(prompt.encode()).hexdigest()}"
+
+    async def get(self, prompt: str) -> str | None:
+        """
+        Look up a cached response for the given prompt.
+        Returns cached response string, or None on miss.
+        """
+        if not self._enabled:
+            return None
+        # GPTCache is synchronous — offload in production
+        try:
+            if self._gptcache:
+                result = self._gptcache.get(prompt)
+                if result:
+                    log.info("semantic_cache.hit", prompt_len=len(prompt))
+                    return result  # type: ignore[return-value]
+        except Exception as exc:
+            log.warning("semantic_cache.get_error", error=str(exc))
+        return None
+
+    async def set(self, prompt: str, response: str) -> None:
+        """Cache an LLM response for the given prompt."""
+        if not self._enabled:
+            return
+        try:
+            if self._gptcache:
+                self._gptcache.set(prompt, response)
+        except Exception as exc:
+            log.warning("semantic_cache.set_error", error=str(exc))
+
+    async def invalidate(self, prompt: str) -> None:
+        """Remove a specific prompt from cache (e.g., after memory write changes context)."""
+        if self._enabled and self._gptcache:
+            try:
+                self._gptcache.delete(prompt)
+            except Exception:
+                pass

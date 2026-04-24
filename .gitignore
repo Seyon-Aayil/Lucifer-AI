@@ -1,0 +1,33 @@
+.env
+*.pyc
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Secrets
+infra/secrets/
+*.pem
+*.key
+
+# Tauri build artifacts
+desktop/src-tauri/target/
+
+# Mobile build artifacts  
+mobile/ios/build/
+mobile/ios/DerivedData/
+mobile/android/.gradle/
+mobile/android/build/
+
+# Docker
+infra/docker-compose.override.yml

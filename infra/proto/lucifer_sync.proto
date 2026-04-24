@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package lucifer.sync.v1;
+
+option python_package = "master.sync";
+
+// ============================================================
+// LuciferSync — bidirectional sync protocol between master
+// and edge devices (desktop / mobile / watch relay).
+// Transport: gRPC over mTLS.
+// ============================================================
+
+service LuciferSync {
+  // Bidirectional streaming: edge pushes deltas, master resolves conflicts
+  // and streams back confirmed state + any master-side updates.
+  rpc SyncStream(stream SyncMessage) returns (stream SyncMessage);
+
+  // Request hot-subgraph manifest for this device (pull, unary).
+  rpc GetHotSubgraph(SubgraphRequest) returns (SubgraphResponse);
+
+  // Push telemetry batch to master (fire-and-forget, at-least-once).
+  rpc PushTelemetry(TelemetryBatch) returns (PushAck);
+}
+
+// ── Sync Messages ─────────────────────────────────────────────────────────────
+message SyncMessage {
+  string device_id         = 1;
+  string sync_session_id   = 2;
+  repeated NodeDelta  node_deltas    = 3;
+  repeated EdgeDelta  edge_deltas    = 4;
+  repeated ArtifactRef new_artifacts = 5;
+  repeated QueuedAction offline_actions = 6;
+  bytes  payload_hmac  = 7;    // AES-GCM auth tag over the serialised payload
+  int64  vector_clock  = 8;    // Lamport clock for conflict detection
+  string client_version = 9;
+}
+
+message NodeDelta {
+  string node_id      = 1;
+  string operation    = 2;  // "upsert" | "soft_delete"
+  string node_type    = 3;  // NodeType enum name
+  bytes  payload      = 4;  // AES-256-GCM encrypted JSON attributes
+  string classification = 5;
+  int64  updated_at   = 6;  // Unix ms
+  string source_agent = 7;
+}
+
+message EdgeDelta {
+  string edge_id      = 1;
+  string operation    = 2;  // "upsert" | "delete"
+  string from_node_id = 3;
+  string to_node_id   = 4;
+  string relation     = 5;
+  float  weight       = 6;
+  int64  valid_from   = 7;  // Unix ms
+  int64  valid_until  = 8;  // 0 = no expiry
+}
+
+message ArtifactRef {
+  string artifact_id   = 1;
+  string content_hash  = 2;  // SHA-256
+  string storage_path  = 3;  // MinIO path on master
+  string mime_type     = 4;
+  int64  size_bytes     = 5;
+}
+
+message QueuedAction {
+  string action_id     = 1;
+  string action_type   = 2;  // "agent.execute", "tool.call", etc.
+  bytes  payload       = 3;
+  int64  queued_at     = 4;  // Unix ms
+}
+
+// ── Subgraph Request / Response ────────────────────────────────────────────────
+message SubgraphRequest {
+  string device_id     = 1;
+  int64  last_sync_at  = 2;    // Unix ms; 0 = full sync
+  int64  max_size_bytes = 3;   // Hint: up to 50MB
+}
+
+message SubgraphResponse {
+  repeated NodeDelta nodes  = 1;
+  repeated EdgeDelta edges  = 2;
+  int64  generated_at       = 3;  // Unix ms
+  string manifest_hash      = 4;  // SHA-256 of full subgraph for integrity check
+  bool   is_full_sync       = 5;
+}
+
+// ── Telemetry ─────────────────────────────────────────────────────────────────
+message TelemetryBatch {
+  string device_id          = 1;
+  repeated TelemetryEvent events = 2;
+}
+
+message TelemetryEvent {
+  string event_type  = 1;
+  int64  timestamp   = 2;   // Unix microseconds
+  string device_id   = 3;
+  string agent_id    = 4;
+  string trace_id    = 5;
+  string span_id     = 6;
+  map<string, double> metrics  = 7;
+  map<string, string> metadata = 8;
+  double cost_usd    = 9;
+  bool   error       = 10;
+  string error_code  = 11;
+}
+
+message PushAck {
+  int32  accepted_count = 1;
+  int32  rejected_count = 2;
+  string message        = 3;
+}

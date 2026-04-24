@@ -1,0 +1,152 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lucifer"
+version = "0.1.0"
+description = "Distributed, privacy-first personal AI OS"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+dependencies = [
+    # --- API ---
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.7.0",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27.0",
+    "websockets>=12.0",
+
+    # --- LLM ---
+    "litellm>=1.40.0",
+    "anthropic>=0.30.0",
+    "openai>=1.35.0",
+    "google-generativeai>=0.7.0",
+    "ollama>=0.2.0",
+
+    # --- Agent Frameworks ---
+    "langgraph>=0.2.0",
+    "crewai>=0.70.0",
+    "pyautogen>=0.3.0",
+
+    # --- Memory ---
+    "mem0ai>=0.1.0",
+    "zep-cloud>=2.0.0",
+
+    # --- Graph DB ---
+    "neo4j>=5.20.0",
+
+    # --- Vector / Token Optimization ---
+    "llmlingua>=0.2.2",
+    "gptcache>=0.1.44",
+    "rank-bm25>=0.2.2",
+    "simhash>=2.1.2",
+    "hdbscan>=0.8.38",
+
+    # --- News Sync ---
+    "feedparser>=6.0.11",
+    "aiohttp>=3.9.5",
+    "trafilatura>=1.12.0",
+    "pymupdf>=1.24.0",
+    "praw>=7.7.1",
+    "arxiv>=2.1.3",
+
+    # --- Storage ---
+    "sqlalchemy[asyncio]>=2.0.30",
+    "aiosqlite>=0.20.0",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+    "redis[hiredis]>=5.0.4",
+    "boto3>=1.34.0",          # MinIO S3-compatible client
+
+    # --- Crypto / Security ---
+    "cryptography>=42.0.0",
+    "argon2-cffi>=23.1.0",
+    "python-jose[cryptography]>=3.3.0",
+    "spacy>=3.7.4",
+
+    # --- Telemetry ---
+    "opentelemetry-sdk>=1.25.0",
+    "opentelemetry-api>=1.25.0",
+    "opentelemetry-exporter-otlp>=1.25.0",
+    "opentelemetry-instrumentation-fastapi>=0.46b0",
+    "opentelemetry-instrumentation-httpx>=0.46b0",
+
+    # --- Message Bus ---
+    "nats-py>=2.7.0",
+
+    # --- Sync ---
+    "grpcio>=1.64.0",
+    "grpcio-tools>=1.64.0",
+    "protobuf>=5.27.0",
+
+    # --- Scheduling ---
+    "apscheduler>=3.10.4",
+
+    # --- Utilities ---
+    "python-dotenv>=1.0.1",
+    "structlog>=24.2.0",
+    "tenacity>=8.3.0",          # Retry with backoff
+    "click>=8.1.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.7",
+    "pytest-cov>=5.0.0",
+    "pytest-mock>=3.14.0",
+    "httpx>=0.27.0",           # TestClient
+    "ruff>=0.4.5",
+    "mypy>=1.10.0",
+    "pre-commit>=3.7.1",
+    "factory-boy>=3.3.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["master"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "TID"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = [
+    "feedparser.*",
+    "trafilatura.*",
+    "hdbscan.*",
+    "simhash.*",
+    "gptcache.*",
+    "llmlingua.*",
+    "neo4j.*",
+    "nats.*",
+    "praw.*",
+    "arxiv.*",
+    "apscheduler.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["master/tests"]
+addopts = "--cov=master --cov-report=term-missing --cov-fail-under=80"
+log_cli = true
+log_level = "INFO"
+
+[tool.hatch.build.targets.wheel]
+packages = ["master"]

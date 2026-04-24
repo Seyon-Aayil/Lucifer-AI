@@ -1,0 +1,79 @@
+model_list:
+  # ── Strong / Master Tier ──────────────────────────────────────────────────
+  - model_name: claude-opus-4
+    litellm_params:
+      model: anthropic/claude-opus-4
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-sonnet-4
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gemini-pro
+    litellm_params:
+      model: google/gemini-1.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+
+  # ── Weak / Cost-Efficient Tier ────────────────────────────────────────────
+  - model_name: claude-haiku-4
+    litellm_params:
+      model: anthropic/claude-haiku-4
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gemini-flash
+    litellm_params:
+      model: google/gemini-2.0-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+  # ── Local / Edge Tier ─────────────────────────────────────────────────────
+  - model_name: ollama-llama3
+    litellm_params:
+      model: ollama/llama3.2:3b
+      api_base: http://host.docker.internal:11434
+
+  - model_name: ollama-phi4
+    litellm_params:
+      model: ollama/phi4-mini
+      api_base: http://host.docker.internal:11434
+
+# ── Router Config ─────────────────────────────────────────────────────────
+router_settings:
+  routing_strategy: latency-based-routing     # fallback: usage-based-routing
+  num_retries: 3
+  retry_after: 5
+  allowed_fails: 5                             # circuit breaker threshold
+  cooldown_time: 60
+
+# ── Budget & Rate Limits (per agent via virtual key tags) ─────────────────
+litellm_settings:
+  max_budget: 10.0                             # USD global daily fallback cap
+  budget_duration: 1d
+  cache: true
+  cache_params:
+    type: redis
+    host: redis
+    port: 6379
+    db: 1
+
+# Per-agent budget enforced via virtual keys (set in DB at startup):
+# financial-agent: $2.00/day
+# health-agent:    $1.00/day
+# coding-agent:    $3.00/day
+# personal-agent:  $2.00/day
+# research-agent:  $2.00/day
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
