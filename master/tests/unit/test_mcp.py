@@ -7,15 +7,13 @@ All external services mocked — no network or DB required.
 """
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 from master.core.exceptions import (
     MCPPermissionError,
     MCPSchemaValidationError,
-    MCPToolNotFoundError,
 )
 from master.mcp.client import AgentManifest, MCPClient
 from master.mcp.interfaces import ToolSchema

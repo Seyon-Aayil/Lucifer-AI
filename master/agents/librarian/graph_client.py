@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession
+from neo4j import AsyncDriver, AsyncGraphDatabase
 
 from master.core.config import get_settings
 from master.core.exceptions import NodeNotFoundError
@@ -30,7 +30,7 @@ class GraphClient:
         self._driver = driver
 
     @classmethod
-    def from_settings(cls) -> "GraphClient":
+    def from_settings(cls) -> GraphClient:
         """Factory: create from application settings."""
         s = get_settings()
         driver = AsyncGraphDatabase.driver(

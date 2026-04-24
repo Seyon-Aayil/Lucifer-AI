@@ -7,9 +7,7 @@ Raises BudgetExceededError when an agent hits its daily cap.
 """
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, date, datetime
-from typing import Any
 
 import asyncpg
 from redis.asyncio import Redis

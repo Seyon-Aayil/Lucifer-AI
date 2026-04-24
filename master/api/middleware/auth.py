@@ -12,7 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from master.core.auth.jwt import TokenClaims, get_device_id_from_token
+from master.core.auth.jwt import TokenClaims
 from master.core.auth.revocation import RevocationStore
 from master.core.exceptions import (
     AuthError,

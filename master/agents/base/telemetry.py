@@ -101,7 +101,7 @@ class TelemetryEmitter:
         except Exception:
             pass  # Telemetry must not crash agent execution
 
-    def timed_context(self, event_type: str, agent_id: str, task_id: str, trace_id: str) -> "TimedEvent":
+    def timed_context(self, event_type: str, agent_id: str, task_id: str, trace_id: str) -> TimedEvent:
         """Context manager that auto-records latency on exit."""
         return TimedEvent(self, event_type, agent_id, task_id, trace_id)
 
@@ -124,7 +124,7 @@ class TimedEvent:
         self._trace_id = trace_id
         self._start: float = 0.0
 
-    def __enter__(self) -> "TimedEvent":
+    def __enter__(self) -> TimedEvent:
         self._start = time.monotonic()
         return self
 
