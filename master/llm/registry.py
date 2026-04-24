@@ -85,8 +85,7 @@ class ProviderRegistry:
                     )
                 )
 
-        # OpenAI, Google, Ollama adapters follow the same pattern (Phase 1 TODO)
-        # Add them here as their adapters are implemented.
+        # OpenAI, Google, Ollama adapters follow the same pattern.
         from master.llm.providers.google import GoogleProvider
         from master.llm.providers.ollama import OllamaProvider
         from master.llm.providers.openai import OpenAIProvider

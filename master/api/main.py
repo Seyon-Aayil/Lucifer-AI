@@ -19,6 +19,9 @@ from master.api.routers import auth, chat, health
 from master.core.config import get_settings
 from master.core.logging import get_logger, setup_logging
 from master.core.telemetry import setup_telemetry
+from master.api.middleware.auth import AuthMiddleware
+from master.core.auth.revocation import RevocationStore
+from redis.asyncio import Redis
 
 log = get_logger(__name__)
 
@@ -95,6 +98,12 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+
+    redis_client = Redis.from_url(settings.redis_url)
+    app.add_middleware(
+        AuthMiddleware,
+        revocation_store=RevocationStore(redis_client)
     )
 
     # ── Routers ─────────────────────────────────────────────────────────────

@@ -116,16 +116,36 @@ async def execute_node(state: OrchestratorState) -> dict[str, Any]:
     """
     with tracer.start_as_current_span("orchestrator.execute"):
         request: AgentRequest = state["agent_request"]
-        # TODO Phase 3: resolve from AgentPool registry
-        # agent = agent_pool.get(request.agent_id)
-        # response = await agent.execute(request)
+        
+        from master.agents.personal.agent import PersonalAgent
+        from master.llm.registry import ProviderRegistry
         from master.agents.base.agent import AgentResponse
-        response = AgentResponse(
-            task_id=request.task_id,
+        
+        # Initialize components dynamically
+        llm_registry = ProviderRegistry.from_settings()
+        
+        class OTelEmitter:
+            def emit_event(self, **kwargs: Any) -> None:
+                log.info("agent.telemetry.event", **kwargs)
+            
+        agent = PersonalAgent(
             agent_id=request.agent_id,
-            status="success",
-            result={"content": f"[Placeholder response for intent: {request.intent}]"},
+            librarian=None,
+            llm_registry=llm_registry,
+            telemetry_emitter=OTelEmitter()
         )
+        
+        try:
+            response = await agent.execute(request)
+        except Exception as exc:
+            log.error("execute_node.agent.failed", error=str(exc))
+            response = AgentResponse(
+                task_id=request.task_id,
+                agent_id=request.agent_id,
+                status="error",
+                error_message=str(exc)
+            )
+
         log.info("orchestrator.execute.done", agent=request.agent_id, status=response.status)
         return {
             "agent_response": response,
@@ -178,9 +198,20 @@ async def memory_write_node(state: OrchestratorState) -> dict[str, Any]:
     """
     with tracer.start_as_current_span("orchestrator.memory_write"):
         deltas = state.get("memory_deltas", [])
-        # TODO Phase 1 Week 5-6: inject real LibrarianClient + NATS
         if deltas:
             log.info("orchestrator.memory_write", delta_count=len(deltas))
+            from master.agents.librarian.graph_client import GraphClient
+            try:
+                gc = GraphClient.from_settings()
+                for delta in deltas:
+                    if delta.operation == "upsert" and delta.node_type and delta.node_id:
+                        await gc.upsert_node(delta.node_type, delta.node_id, delta.attributes)
+                    elif delta.operation == "edge_upsert" and delta.from_node_id and delta.to_node_id and delta.edge_relation:
+                        await gc.upsert_edge(delta.from_node_id, delta.to_node_id, delta.edge_relation)
+                await gc.close()
+            except Exception as e:
+                log.error("orchestrator.memory_write_failed", error=str(e))
+                
         return {"memory_written": True}
 
 

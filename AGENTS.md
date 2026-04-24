@@ -150,6 +150,8 @@ return AgentResponse(
     memory_deltas=[],
     token_usage=TokenUsage(...),
     escalation_reason=None,
+    error_message=None,
+    cost_usd=0.0,
 )
 ```
 
@@ -171,7 +173,7 @@ return AgentResponse(
 ## Security Rules (Non-Negotiable)
 
 1. **PII before dispatch**: Any content going to a cloud LLM must pass through
-   `PIIScanner.scan()` first. This is enforced in the API middleware, but agents
+   `PIIScanner.scan()` first. This is enforced at the API router layer, but agents
    building their own prompts must call it explicitly on dynamic content.
 
 2. **Data classification**: Never pass `Restricted` or `Secret` nodes to a
