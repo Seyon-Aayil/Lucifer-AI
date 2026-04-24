@@ -180,18 +180,16 @@ class TokenOptimizer:
     def _deduplicate(self, chunks: list[ContextChunk]) -> list[ContextChunk]:
         """SimHash-based near-duplicate removal."""
         try:
-            from simhash import Simhash  # type: ignore[import]
+            from simhash import Simhash, SimhashIndex  # type: ignore[import]
 
-            seen: list[tuple[int, str]] = []
             unique: list[ContextChunk] = []
+            index = SimhashIndex([], k=self._dedup_threshold)
+
             for chunk in chunks:
-                sh = Simhash(chunk.text).value
-                if not any(
-                    bin(sh ^ s).count("1") <= self._dedup_threshold
-                    for s, _ in seen
-                ):
-                    seen.append((sh, chunk.chunk_id))
+                sh = Simhash(chunk.text)
+                if not index.get_near_dups(sh):
                     unique.append(chunk)
+                    index.add(chunk.chunk_id, sh)
             return unique
         except (ImportError, Exception):
             # Fallback: MD5 exact dedup

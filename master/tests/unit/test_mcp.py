@@ -124,3 +124,31 @@ class TestMCPClientAudit:
         call_kwargs = audit_mock.log_event.call_args.kwargs
         assert call_kwargs["event_type"] == "mcp.tool_call"
         assert "gmail" in call_kwargs["action"]
+
+
+class TestMCPClientTransport:
+    @pytest.mark.asyncio
+    async def test_invoke_missing_transport_returns_error_result(self) -> None:
+        """
+        Verify that if a server is allowed but has no transport registered,
+        invoke() returns a failed ToolInvocationResult instead of raising.
+        """
+        client, _ = _make_client(allowed={"gmail": ["read_emails"]})
+        # Remove the registered transport to trigger the error path
+        client._transports = {}
+
+        # Pre-populate cache so it doesn't fail at _get_tool_schema (which also checks transports)
+        client._tool_cache["gmail"] = {
+            "read_emails": ToolSchema(
+                name="read_emails",
+                description="Read emails",
+                input_schema={},
+            )
+        }
+
+        result = await client.invoke("gmail", "read_emails", {})
+
+        assert result.success is False
+        assert "No transport registered for server 'gmail'" in result.error
+        assert result.server_id == "gmail"
+        assert result.tool_name == "read_emails"
