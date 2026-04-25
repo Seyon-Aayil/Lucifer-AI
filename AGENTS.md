@@ -290,22 +290,100 @@ return AgentResponse(
 
 ## Phase Context
 
-**Current phase: Phase 1 complete → Phase 2 in progress.**
+**Current phase: Phase 2 complete → Phase 3 in progress.**
 
-Phase 1 priorities (✅ Completed):
-1. `master/core/auth/` — JWT issue, refresh, device revocation (done)
-2. `master/api/middleware/` — PII scanner (router layer), content policy (stubbed), auth validation (done)
-3. `master/llm/` — `LLMProvider` interface + adapters (Anthropic, OpenAI, Google, Ollama) (done)
-4. `master/llm/registry.py` — `ProviderRegistry` with RouteLLM + LiteLLM + circuit breaker (done)
-5. `master/token_optimizer/` — GPTCache → budget → profiler → LLMLingua-2 → trim → dedup (structure done)
-6. `master/agents/librarian/` — Neo4j CRUD, context package, memory write, ACL enforcement (structure done)
-7. `master/agents/base/` — `BaseAgent`, `AgentRequest`, `AgentResponse`, `RiskTier` (done)
-8. `master/orchestrator/` — LangGraph graph: classify → inject → budget → route → execute → synthesise → write (done)
+---
 
-Phase 2 priorities (in order):
-1. `master/mcp/` — Complete MCP client sandbox container orchestration and secure manifest parsing.
-2. Integrations — Gmail, Google Calendar, Notion, and GitHub MCP server implementations.
-3. Budget Hardening — Real-time cost exhaustion limits linked to TimescaleDB token traces.
+### Phase 1 — Foundation (✅ Complete)
 
-Do not start Phase 3 work (Full Agent Swarm, News Pipeline) until Phase 2 DoD is met:
-> Agents securely invoking remote Dockerized MCP tools with strict schema validation and full audit logging.
+1. `master/core/auth/` — JWT issue, refresh, device revocation ✅
+2. `master/api/middleware/` — PII scanner (router layer), AuthMiddleware ✅
+3. `master/llm/` — `LLMProvider` interface + Anthropic, OpenAI, Google, Ollama adapters ✅
+4. `master/llm/registry.py` — `ProviderRegistry` with RouteLLM + LiteLLM + circuit breaker + budget tracking ✅
+5. `master/token_optimizer/` — GPTCache → budget → BM25 scoring → SimHash dedup → LLMLingua-2 → trim ✅
+6. `master/agents/librarian/` — Neo4j CRUD, ACL enforcement, graph_client ✅ (Mem0/Zep stubs: Phase 3)
+7. `master/agents/base/` — `BaseAgent`, `AgentRequest`, `AgentResponse`, `RiskTier` ✅
+8. `master/orchestrator/` — LangGraph graph: classify → inject → budget → route → execute → hitl → synthesise → write ✅
+9. `master/agents/personal/` — `PersonalAgent` wired into orchestrator with real LLM dispatch ✅
+
+**Phase 1 DoD met:** Message via web UI → Librarian context → RouteLLM model selection → response streamed → memory delta written → telemetry emitted.
+
+---
+
+### Phase 2 — MCP Integrations + Budget Hardening (✅ Complete)
+
+1. `master/mcp/transport/docker.py` — DockerTransport: spawn container, health-check, delegate to SSE, destroy on disconnect ✅
+2. `master/mcp/registry.py` — `MCPServerRegistry`: loads `infra/mcp_servers.yaml`, creates transports, vends `MCPClient` per agent manifest ✅
+3. `integrations/gmail/` — Gmail MCP server (read, search, draft, send, label) + Dockerfile ✅
+4. `integrations/gcal/` — Google Calendar MCP server (list, create, find_slot, update, delete) + Dockerfile ✅
+5. `integrations/notion/` — Notion MCP server (search, read, create, update block, query DB) + Dockerfile ✅
+6. `integrations/github/` — GitHub MCP server (PRs, diff, issues, repo summary, workflows) + Dockerfile ✅
+7. `master/agents/*/agent_manifest.json` — Tool ACL manifests for personal, coding, research agents ✅
+8. `master/llm/registry.py` — `complete_with_retry()` integrates `SpendTracker`: pre-flight budget check + post-call cost recording ✅
+9. `master/api/main.py` — Full lifespan: Postgres pool → Redis → SpendTracker → MCPServerRegistry → NATS, clean shutdown ✅
+
+**Phase 2 DoD met:** Agents securely invoke remote Dockerized MCP tools with strict schema validation, manifest ACL enforcement, and HMAC audit logging.
+
+---
+
+### Phase 3 — Full Agent Swarm + News Pipeline (🔄 Next)
+
+**DoD to exit Phase 3:** All 5 specialist agents operational; news digest pipeline running on schedule; Mem0/Zep memory fully wired; AsyncPostgresSaver replacing MemorySaver in LangGraph.
+
+Priority order:
+
+1. **Agent Pool Registry** (`master/orchestrator/agent_pool.py`)
+   - Dynamic `agent_id → BaseAgent` registry replacing the hardcoded `PersonalAgent` instantiation in `execute_node`
+   - Agents loaded via config; supports hot-reload
+   - Status: **Missing — must be built**
+
+2. **Remaining Specialist Agents**
+   - `master/agents/coding/agent.py` — Code review, PR analysis, GitHub tool calls
+   - `master/agents/financial/agent.py` — Spend tracking, budget alerts (HIGH risk → HitL always)
+   - `master/agents/health/agent.py` — HealthKit data queries (local-only; never cloud)
+   - `master/agents/research/agent.py` — Web search + Notion read + summarisation
+   - Status: **Missing — must be built**
+
+3. **LibrarianAgent Full Wiring** (`master/agents/librarian/`)
+   - `mem0_client.py` — Real Mem0 API integration (episodic memory)
+   - `zep_client.py` — Real Zep/Graphiti API integration (temporal graph)
+   - `context_builder.py` — Assemble ACL-filtered ContextPackage from Mem0 + Zep + Neo4j
+   - `memory_writer.py` — Apply `MemoryDelta` list to all three stores
+   - `decay_scheduler.py` — APScheduler job for nightly decay pass
+   - Status: **Stubs in place — logic missing**
+
+4. **Orchestrator Real LibrarianClient** (`master/orchestrator/graph.py`)
+   - `context_inject_node`: replace placeholder `ContextPackage` with real `librarian.get_context_package(agent_id, intent)` call
+   - `memory_write_node`: replace direct GraphClient call with `librarian.apply_deltas(memory_deltas)` to write across all three stores
+   - Status: **Placeholder logic — must be replaced**
+
+5. **AsyncPostgresSaver Checkpointer** (`master/orchestrator/graph.py`)
+   - Replace `MemorySaver()` with `AsyncPostgresSaver` for persistent multi-turn conversation state
+   - Requires `langgraph-checkpoint-postgres` dependency
+   - Status: **In-memory only — must be upgraded**
+
+6. **News Sync Engine** (`master/news/`)
+   - Fetch → extract → score → cluster → digest pipeline
+   - Sources: RSS, HackerNews API, Reddit API
+   - Scheduled via APScheduler; writes `NewsItem` nodes to Neo4j
+   - Status: **Directory empty — must be built**
+
+7. **Intent Classifier Upgrade** (`master/orchestrator/graph.py`)
+   - Replace `_simple_intent_classifier()` rule-based approach with a lightweight local model (e.g. `distilbert-base` zero-shot via Ollama)
+   - Status: **Rule-based stub — upgrade in Phase 3**
+
+8. **Content Policy Middleware** (`master/api/middleware/content_policy.py`)
+   - Implement actual safety classification beyond the current stub
+   - Status: **Stub — must be implemented**
+
+9. **Token Optimizer — context_profiler.py / deduplicator.py stubs**
+   - These are already implemented inline in `pipeline.py` (BM25 scoring + SimHash dedup)
+   - The standalone class files are redundant stubs — they can be removed or given proper implementations if needed as standalone components
+   - Status: **Low priority cleanup**
+
+10. **MCP Integration for Agents**
+    - `PersonalAgent._chat()` and intent handlers need to accept an `MCPClient` and invoke tools (e.g., calendar summary via `gcal.list_events`)
+    - Currently all MCP handler methods return Phase 3 stubs
+    - Status: **Wiring pending**
+
+Do not start Phase 4 work (Desktop Tauri app) until Phase 3 DoD is met.

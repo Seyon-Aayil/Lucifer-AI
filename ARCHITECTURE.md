@@ -1,8 +1,8 @@
 # Lucifer AI — Detailed System Architecture
 
-> **Version:** 0.2 (Research-Refined)  
-> **Last Updated:** 2026-04-24  
-> **Status:** Architecture Design Phase
+> **Version:** 0.3 (Phase 2 Complete)  
+> **Last Updated:** 2026-04-25  
+> **Status:** Phase 3 In Progress — Agent Swarm + News Pipeline
 
 ---
 
