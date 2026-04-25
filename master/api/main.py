@@ -10,18 +10,22 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import asyncpg
 import nats
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from redis.asyncio import Redis
 
+from master.api.middleware.auth import AuthMiddleware
 from master.api.routers import auth, chat, health
+from master.core.auth.revocation import RevocationStore
 from master.core.config import get_settings
 from master.core.logging import get_logger, setup_logging
 from master.core.telemetry import setup_telemetry
-from master.api.middleware.auth import AuthMiddleware
-from master.core.auth.revocation import RevocationStore
-from redis.asyncio import Redis
+from master.mcp.audit import AuditLogger
+from master.mcp.registry import MCPServerRegistry
+from master.token_optimizer.spend_tracker import SpendTracker
 
 log = get_logger(__name__)
 
@@ -35,14 +39,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     log.info("lucifer.startup", env=settings.app_env.value)
 
-    # ── NATS JetStream ──────────────────────────────────────────────────────
+    # ── Postgres connection pool ─────────────────────────────────────────────
+    db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=20)
+    app.state.db_pool = db_pool
+    log.info("postgres.connected")
+
+    # ── Redis ────────────────────────────────────────────────────────────────
+    redis_client = Redis.from_url(settings.redis_url)
+    app.state.redis = redis_client
+    log.info("redis.connected")
+
+    # ── SpendTracker (budget hardening) ─────────────────────────────────────
+    spend_tracker = SpendTracker(redis=redis_client, db_pool=db_pool)
+    await spend_tracker.load_limits()
+    app.state.spend_tracker = spend_tracker
+    log.info("spend_tracker.ready")
+
+    # ── MCP Registry ─────────────────────────────────────────────────────────
+    audit_logger = AuditLogger(db_pool)
+    mcp_registry = MCPServerRegistry.from_config(audit_logger)
+    await mcp_registry.connect_all()
+    app.state.mcp_registry = mcp_registry
+    log.info("mcp_registry.ready")
+
+    # ── NATS JetStream ───────────────────────────────────────────────────────
     nc = await nats.connect(settings.nats_url)
     js = nc.jetstream()
     app.state.nats = nc
     app.state.js = js
     log.info("nats.connected", url=settings.nats_url)
 
-    # ── Create JetStream streams (idempotent) ───────────────────────────────
+    # ── Create JetStream streams (idempotent) ────────────────────────────────
     stream_subjects = {
         "lucifer-agents":    ["agent.task.>"],
         "lucifer-memory":    ["memory.delta.>"],
@@ -60,10 +87,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield  # ── Application is running ────────────────────────────────────────
 
-    # ── Shutdown ─────────────────────────────────────────────────────────────
+    # ── Shutdown ──────────────────────────────────────────────────────────────
     log.info("lucifer.shutdown")
+    await mcp_registry.disconnect_all()
     await nc.drain()
-    log.info("nats.disconnected")
+    await db_pool.close()
+    await redis_client.aclose()
+    log.info("lucifer.shutdown.complete")
+
 
 
 def create_app() -> FastAPI:

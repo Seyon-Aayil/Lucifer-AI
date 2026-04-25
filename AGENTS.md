@@ -290,18 +290,22 @@ return AgentResponse(
 
 ## Phase Context
 
-**Current phase: Phase 0 complete → Phase 1 in progress.**
+**Current phase: Phase 1 complete → Phase 2 in progress.**
 
-Phase 1 priorities (in order):
-1. `master/core/auth/` — JWT issue, refresh, device revocation
-2. `master/api/middleware/` — PII scanner, content policy, auth validation
-3. `master/llm/` — `LLMProvider` interface + adapters (Anthropic, OpenAI, Google, Ollama)
-4. `master/llm/registry.py` — `ProviderRegistry` with RouteLLM + LiteLLM + circuit breaker
-5. `master/token_optimizer/` — GPTCache → budget → profiler → LLMLingua-2 → trim → dedup
-6. `master/agents/librarian/` — Neo4j CRUD, context package, memory write, ACL enforcement
-7. `master/agents/base/` — `BaseAgent`, `AgentRequest`, `AgentResponse`, `RiskTier`
-8. `master/orchestrator/` — LangGraph graph: classify → inject → budget → route → execute → synthesise → write
+Phase 1 priorities (✅ Completed):
+1. `master/core/auth/` — JWT issue, refresh, device revocation (done)
+2. `master/api/middleware/` — PII scanner (router layer), content policy (stubbed), auth validation (done)
+3. `master/llm/` — `LLMProvider` interface + adapters (Anthropic, OpenAI, Google, Ollama) (done)
+4. `master/llm/registry.py` — `ProviderRegistry` with RouteLLM + LiteLLM + circuit breaker (done)
+5. `master/token_optimizer/` — GPTCache → budget → profiler → LLMLingua-2 → trim → dedup (structure done)
+6. `master/agents/librarian/` — Neo4j CRUD, context package, memory write, ACL enforcement (structure done)
+7. `master/agents/base/` — `BaseAgent`, `AgentRequest`, `AgentResponse`, `RiskTier` (done)
+8. `master/orchestrator/` — LangGraph graph: classify → inject → budget → route → execute → synthesise → write (done)
 
-Do not start Phase 2 work (MCP integrations, Gmail, Notion) until Phase 1 DoD is met:
-> End-to-end: message via web UI → Librarian context → RouteLLM model selection →
-> response streamed → memory delta written → telemetry event in TimescaleDB.
+Phase 2 priorities (in order):
+1. `master/mcp/` — Complete MCP client sandbox container orchestration and secure manifest parsing.
+2. Integrations — Gmail, Google Calendar, Notion, and GitHub MCP server implementations.
+3. Budget Hardening — Real-time cost exhaustion limits linked to TimescaleDB token traces.
+
+Do not start Phase 3 work (Full Agent Swarm, News Pipeline) until Phase 2 DoD is met:
+> Agents securely invoking remote Dockerized MCP tools with strict schema validation and full audit logging.

@@ -1,0 +1,10 @@
+{
+  "agent_id": "personal-agent",
+  "description": "Personal assistant agent — scheduling, email, notes, calendar",
+  "allowed_tools": {
+    "gmail": ["read_emails", "search_emails", "compose_draft", "send_email", "apply_label"],
+    "gcal": ["list_events", "create_event", "find_slot", "update_event", "delete_event"],
+    "notion": ["search_pages", "read_page", "create_page", "update_block", "query_database"],
+    "slack": ["read_channel", "search_messages", "send_message"]
+  }
+}

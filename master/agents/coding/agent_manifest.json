@@ -1,0 +1,7 @@
+{
+  "agent_id": "coding-agent",
+  "description": "Coding agent — code review, PR analysis, issue creation",
+  "allowed_tools": {
+    "github": ["list_prs", "read_pr", "create_issue", "get_repo_summary", "list_workflows"]
+  }
+}

@@ -230,14 +230,31 @@ class ProviderRegistry:
         self,
         provider: LLMProvider,
         request: CompletionRequest,
+        agent_id: str | None = None,
+        spend_tracker: Any | None = None,
     ) -> CompletionResponse:
         """
         Execute a completion with tenacity retry (3 attempts, exponential backoff).
+        Pre-flight budget check via SpendTracker if provided.
         Reports failure/success to the circuit breaker automatically.
         """
+        # ── Budget pre-flight ──────────────────────────────────────────────────
+        if spend_tracker and agent_id:
+            estimated = provider.cost_per_input_token * request.max_tokens
+            await spend_tracker.check_budget(agent_id, estimated)
+
         try:
             response = await provider.complete(request)
             await self.report_success(provider.provider_id)
+
+            # ── Record actual spend ────────────────────────────────────────────
+            if spend_tracker and agent_id:
+                actual_cost = (
+                    response.token_usage.input_tokens * provider.cost_per_input_token
+                    + response.token_usage.output_tokens * provider.cost_per_output_token
+                )
+                await spend_tracker.record_spend(agent_id, actual_cost)
+
             return response
         except Exception as exc:
             await self.report_failure(provider.provider_id, exc)
