@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
@@ -201,9 +201,11 @@ class BaseAgent(ABC):
       - Telemetry emission on every action
       - AgentResponse contract from execute()
 
-    Subclasses must implement execute().
+    Subclasses must implement execute() and define AGENT_ID as a class variable.
     Optionally override stream_execute() for streaming surfaces.
     """
+
+    AGENT_ID: ClassVar[str] = ""  # every subclass must override this
 
     def __init__(
         self,
@@ -211,11 +213,13 @@ class BaseAgent(ABC):
         librarian: Any,              # LibrarianClient — typed loosely to avoid circular import
         llm_registry: Any,           # ProviderRegistry
         telemetry_emitter: Any,      # TelemetryEmitter
+        mcp_client: Any = None,      # MCPClient — injected by orchestrator from app-level registry
     ) -> None:
         self.agent_id = agent_id
         self._librarian = librarian
         self._llm = llm_registry
         self._telemetry = telemetry_emitter
+        self._mcp = mcp_client
 
     @abstractmethod
     async def execute(self, request: AgentRequest) -> AgentResponse:

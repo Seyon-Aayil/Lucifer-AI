@@ -326,36 +326,40 @@ return AgentResponse(
 
 ---
 
-### Phase 3 — Full Agent Swarm + News Pipeline (🔄 Next)
+### Phase 3 — Full Agent Swarm + News Pipeline (🔄 In Progress)
 
 **DoD to exit Phase 3:** All 5 specialist agents operational; news digest pipeline running on schedule; Mem0/Zep memory fully wired; AsyncPostgresSaver replacing MemorySaver in LangGraph.
 
 Priority order:
 
-1. **Agent Pool Registry** (`master/orchestrator/agent_pool.py`)
-   - Dynamic `agent_id → BaseAgent` registry replacing the hardcoded `PersonalAgent` instantiation in `execute_node`
-   - Agents loaded via config; supports hot-reload
-   - Status: **Missing — must be built**
+1. **Agent Pool Registry** (`master/orchestrator/agent_pool.py`) ✅
+   - `AgentPool.build_default()` auto-registers all agents; silently skips modules not yet importable
+   - `AgentPool.resolve(agent_id, **deps)` instantiates the correct agent; falls back to `personal-agent`
+   - `AgentPool.reload()` for hot-reload without process restart
+   - `execute_node` now uses module-level `_agent_pool` singleton instead of hardcoded `PersonalAgent`
+   - `BaseAgent.AGENT_ID: ClassVar[str]` added to enforce the registry contract on all subclasses
+   - Status: **Done**
 
-2. **Remaining Specialist Agents**
-   - `master/agents/coding/agent.py` — Code review, PR analysis, GitHub tool calls
-   - `master/agents/financial/agent.py` — Spend tracking, budget alerts (HIGH risk → HitL always)
-   - `master/agents/health/agent.py` — HealthKit data queries (local-only; never cloud)
-   - `master/agents/research/agent.py` — Web search + Notion read + summarisation
-   - Status: **Missing — must be built**
+2. **Remaining Specialist Agents** ✅
+   - `master/agents/coding/agent.py` — PR review, repo summary, issue creation via GitHub MCP ✅
+   - `master/agents/financial/agent.py` — Spend tracking; write intents always escalate for HitL ✅
+   - `master/agents/health/agent.py` — Wellness queries; enforces Ollama-only (no cloud LLM) ✅
+   - `master/agents/research/agent.py` — Notion search + summarisation + GitHub repo context ✅
+   - Agent manifests created for financial and health agents ✅
+   - Status: **Done**
 
 3. **LibrarianAgent Full Wiring** (`master/agents/librarian/`)
    - `mem0_client.py` — Real Mem0 API integration (episodic memory)
    - `zep_client.py` — Real Zep/Graphiti API integration (temporal graph)
-   - `context_builder.py` — Assemble ACL-filtered ContextPackage from Mem0 + Zep + Neo4j
+   - `context_builder.py` — Interface wired; async `build()` returns `ContextPackage`; Neo4j/Mem0/Zep queries pending ✅ (interface done)
    - `memory_writer.py` — Apply `MemoryDelta` list to all three stores
    - `decay_scheduler.py` — APScheduler job for nightly decay pass
    - Status: **Stubs in place — logic missing**
 
 4. **Orchestrator Real LibrarianClient** (`master/orchestrator/graph.py`)
-   - `context_inject_node`: replace placeholder `ContextPackage` with real `librarian.get_context_package(agent_id, intent)` call
+   - `context_inject_node`: wired to `ContextBuilder(GraphClient)` with graceful fallback ✅
    - `memory_write_node`: replace direct GraphClient call with `librarian.apply_deltas(memory_deltas)` to write across all three stores
-   - Status: **Placeholder logic — must be replaced**
+   - Status: **Partially done — memory_write_node still uses direct GraphClient**
 
 5. **AsyncPostgresSaver Checkpointer** (`master/orchestrator/graph.py`)
    - Replace `MemorySaver()` with `AsyncPostgresSaver` for persistent multi-turn conversation state
@@ -369,8 +373,8 @@ Priority order:
    - Status: **Directory empty — must be built**
 
 7. **Intent Classifier Upgrade** (`master/orchestrator/graph.py`)
-   - Replace `_simple_intent_classifier()` rule-based approach with a lightweight local model (e.g. `distilbert-base` zero-shot via Ollama)
-   - Status: **Rule-based stub — upgrade in Phase 3**
+   - `_ollama_intent_classifier()` calls Ollama `mistral` with structured JSON prompt; falls back to rule-based on timeout/error ✅
+   - Status: **Done**
 
 8. **Content Policy Middleware** (`master/api/middleware/content_policy.py`)
    - Implement actual safety classification beyond the current stub
@@ -381,9 +385,11 @@ Priority order:
    - The standalone class files are redundant stubs — they can be removed or given proper implementations if needed as standalone components
    - Status: **Low priority cleanup**
 
-10. **MCP Integration for Agents**
-    - `PersonalAgent._chat()` and intent handlers need to accept an `MCPClient` and invoke tools (e.g., calendar summary via `gcal.list_events`)
-    - Currently all MCP handler methods return Phase 3 stubs
-    - Status: **Wiring pending**
+10. **MCP Integration for Agents** ✅
+    - `BaseAgent` now accepts `mcp_client` parameter stored as `self._mcp`
+    - `PersonalAgent._summarise_calendar` and `_schedule_meeting` invoke `gcal` MCP tools with graceful fallback
+    - `execute_node` extracts `mcp_registry` from LangGraph config and passes a wired `MCPClient` to the agent
+    - `chat.py` REST and WebSocket handlers inject `app.state.mcp_registry` into graph config
+    - Status: **Done**
 
 Do not start Phase 4 work (Desktop Tauri app) until Phase 3 DoD is met.

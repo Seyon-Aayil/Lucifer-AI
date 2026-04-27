@@ -54,9 +54,14 @@ async def _check_pii(message: str, allow_pii: bool) -> None:
 from typing import Any
 
 
-async def _run_graph(state: OrchestratorState) -> OrchestratorState:
+async def _run_graph(state: OrchestratorState, mcp_registry: Any = None) -> OrchestratorState:
     """Run the LangGraph orchestrator and return final state."""
-    config: dict[str, Any] = {"configurable": {"thread_id": state.get("task_id", "default")}}
+    config: dict[str, Any] = {
+        "configurable": {
+            "thread_id": state.get("task_id", "default"),
+            "mcp_registry": mcp_registry,
+        }
+    }
     result: OrchestratorState = await _graph.ainvoke(state, config=config)  # type: ignore[arg-type,call-overload]
     return result
 
@@ -100,8 +105,9 @@ async def chat(
             "retry_count": 0,
         }
 
+        mcp_registry = getattr(request.app.state, "mcp_registry", None)
         try:
-            final_state = await _run_graph(initial_state)
+            final_state = await _run_graph(initial_state, mcp_registry=mcp_registry)
         except Exception as exc:
             log.error("chat.orchestrator.failed", error=str(exc), trace_id=trace_id)
             from fastapi import HTTPException
@@ -168,9 +174,15 @@ async def chat_websocket(websocket: WebSocket) -> None:
                 "retry_count": 0,
             }
 
+            mcp_registry = getattr(websocket.app.state, "mcp_registry", None)
             try:
                 # Stream graph execution events
-                config: dict[str, Any] = {"configurable": {"thread_id": task_id}}
+                config: dict[str, Any] = {
+                    "configurable": {
+                        "thread_id": task_id,
+                        "mcp_registry": mcp_registry,
+                    }
+                }
                 async for event in _graph.astream_events(initial_state, config=config, version="v2"):  # type: ignore[arg-type,attr-defined]
                     if event["event"] == "on_chain_stream":
                         chunk_data = event.get("data", {}).get("chunk", {})
