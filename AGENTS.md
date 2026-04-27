@@ -290,7 +290,7 @@ return AgentResponse(
 
 ## Phase Context
 
-**Current phase: Phase 2 complete → Phase 3 in progress.**
+**Current phase: Phase 3 complete → Phase 4 next.**
 
 ---
 
@@ -326,7 +326,7 @@ return AgentResponse(
 
 ---
 
-### Phase 3 — Full Agent Swarm + News Pipeline (🔄 In Progress)
+### Phase 3 — Full Agent Swarm + News Pipeline (✅ Complete)
 
 **DoD to exit Phase 3:** All 5 specialist agents operational; news digest pipeline running on schedule; Mem0/Zep memory fully wired; AsyncPostgresSaver replacing MemorySaver in LangGraph.
 
@@ -385,10 +385,12 @@ Priority order:
    - `validate()` shim preserved for backward compatibility
    - Status: **Done**
 
-9. **Token Optimizer — context_profiler.py / deduplicator.py stubs**
-   - These are already implemented inline in `pipeline.py` (BM25 scoring + SimHash dedup)
-   - The standalone class files are redundant stubs — they can be removed or given proper implementations if needed as standalone components
-   - Status: **Low priority cleanup**
+9. **Token Optimizer — context_profiler.py / deduplicator.py** ✅
+   - `types.py` — `ContextChunk`, `PreparedContext`, `estimate_tokens` extracted from `pipeline.py`
+   - `context_profiler.py` — `ContextProfiler.profile()` implements BM25 keyword-overlap scoring as a proper standalone class
+   - `deduplicator.py` — `SemanticDeduplicator.deduplicate()` implements SimHash near-duplicate removal (MD5 fallback) as a proper standalone class
+   - `pipeline.py` delegates stages 3 and 4 to these classes; imports types from `types.py`
+   - Status: **Done**
 
 10. **MCP Integration for Agents** ✅
     - `BaseAgent` now accepts `mcp_client` parameter stored as `self._mcp`
@@ -397,4 +399,6 @@ Priority order:
     - `chat.py` REST and WebSocket handlers inject `app.state.mcp_registry` into graph config
     - Status: **Done**
 
-Do not start Phase 4 work (Desktop Tauri app) until Phase 3 DoD is met.
+**Phase 3 DoD met:** All 5 specialist agents operational; news digest pipeline running on schedule; Mem0/Zep memory fully wired; AsyncPostgresSaver replacing MemorySaver in LangGraph.
+
+Phase 4 work (Desktop Tauri app) may now begin.
