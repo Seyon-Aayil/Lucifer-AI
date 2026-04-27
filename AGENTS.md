@@ -361,24 +361,29 @@ Priority order:
    - `memory_write_node`: uses `MemoryWriter.apply_deltas()` — writes to Neo4j + Mem0 + Zep ✅
    - Status: **Done**
 
-5. **AsyncPostgresSaver Checkpointer** (`master/orchestrator/graph.py`)
-   - Replace `MemorySaver()` with `AsyncPostgresSaver` for persistent multi-turn conversation state
-   - Requires `langgraph-checkpoint-postgres` dependency
-   - Status: **In-memory only — must be upgraded**
+5. **AsyncPostgresSaver Checkpointer** (`master/orchestrator/graph.py`) ✅
+   - `build_graph(checkpointer=None)` now accepts an optional checkpointer; defaults to `MemorySaver` (safe for tests/import-time)
+   - FastAPI lifespan creates `AsyncPostgresSaver.from_conn_string(database_url)`, calls `.setup()` (auto-creates checkpoint tables), rebuilds graph with it and stores on `app.state.graph`
+   - `chat.py` REST + WebSocket prefer `app.state.graph` (Postgres-backed), fall back to `_graph_fallback` (in-memory)
+   - `langgraph-checkpoint-postgres>=2.0.0` added to `pyproject.toml`
+   - Status: **Done**
 
-6. **News Sync Engine** (`master/news/`)
-   - Fetch → extract → score → cluster → digest pipeline
-   - Sources: RSS, HackerNews API, Reddit API
-   - Scheduled via APScheduler; writes `NewsItem` nodes to Neo4j
-   - Status: **Directory empty — must be built**
+6. **News Sync Engine** (`master/news/`) ✅
+   - `pipeline.py` — fetch (parallel) → score (recency 70% + content 30%) → deduplicate against Neo4j url_hashes → upsert `News` nodes
+   - `scheduler.py` — `NewsScheduler.create()` wires default sources (HN, arXiv CS.AI/CS.LG, GitHub Trending, r/programming, r/MachineLearning); `attach()` hooks into AsyncIOScheduler at configurable cadence
+   - Both wired into FastAPI lifespan; guarded by `settings.news_scheduler_enabled`
+   - Status: **Done**
 
 7. **Intent Classifier Upgrade** (`master/orchestrator/graph.py`)
    - `_ollama_intent_classifier()` calls Ollama `mistral` with structured JSON prompt; falls back to rule-based on timeout/error ✅
    - Status: **Done**
 
-8. **Content Policy Middleware** (`master/api/middleware/content_policy.py`)
-   - Implement actual safety classification beyond the current stub
-   - Status: **Stub — must be implemented**
+8. **Content Policy Middleware** (`master/api/middleware/content_policy.py`) ✅
+   - Input checks: length guard (32k chars), hard blocklist (malware/CSAM/weapons), prompt-injection patterns (role overrides, token injection, instruction-ignore phrases)
+   - Output check: credential/secret leak detection (passwords, API keys, private keys)
+   - `validate_input()` + `validate_output()` wired into `chat.py` REST handler (both directions checked)
+   - `validate()` shim preserved for backward compatibility
+   - Status: **Done**
 
 9. **Token Optimizer — context_profiler.py / deduplicator.py stubs**
    - These are already implemented inline in `pipeline.py` (BM25 scoring + SimHash dedup)

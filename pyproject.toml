@@ -28,6 +28,7 @@ dependencies = [
 
     # --- Agent Frameworks ---
     "langgraph>=0.2.0",
+    "langgraph-checkpoint-postgres>=2.0.0",
     "crewai>=0.70.0",
     "pyautogen>=0.3.0",
 

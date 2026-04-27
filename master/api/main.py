@@ -29,6 +29,8 @@ from master.core.logging import get_logger, setup_logging
 from master.core.telemetry import setup_telemetry
 from master.mcp.audit import AuditLogger
 from master.mcp.registry import MCPServerRegistry
+from master.news.scheduler import NewsScheduler
+from master.orchestrator.graph import build_graph
 from master.token_optimizer.spend_tracker import SpendTracker
 
 log = get_logger(__name__)
@@ -66,11 +68,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.mcp_registry = mcp_registry
     log.info("mcp_registry.ready")
 
-    # ── Memory Decay Scheduler ───────────────────────────────────────────────
+    # ── AsyncPostgresSaver — persistent LangGraph checkpointer ──────────────
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    pg_checkpointer = AsyncPostgresSaver.from_conn_string(settings.database_url)
+    await pg_checkpointer.setup()  # creates checkpoint tables if not present
+    app.state.graph = build_graph(checkpointer=pg_checkpointer)
+    app.state.pg_checkpointer = pg_checkpointer
+    log.info("langgraph_checkpointer.ready", backend="postgres")
+
+    # ── Memory Decay + News Schedulers ───────────────────────────────────────
     graph_client = GraphClient.from_settings()
-    decay_scheduler = DecayScheduler(graph_client)
     scheduler = AsyncIOScheduler()
+
+    decay_scheduler = DecayScheduler(graph_client)
     decay_scheduler.attach(scheduler)
+
+    if settings.news_scheduler_enabled:
+        news_scheduler = await NewsScheduler.create(graph_client)
+        news_scheduler.attach(scheduler)
+        app.state.news_scheduler = news_scheduler
+        log.info("news_scheduler.ready")
+
     scheduler.start()
     app.state.scheduler = scheduler
     app.state.graph_client = graph_client
@@ -104,6 +122,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Shutdown ──────────────────────────────────────────────────────────────
     log.info("lucifer.shutdown")
     scheduler.shutdown(wait=False)
+    if hasattr(app.state, "news_scheduler"):
+        await app.state.news_scheduler.close()
+    await pg_checkpointer.conn.close()
     await graph_client.close()
     await mcp_registry.disconnect_all()
     await nc.drain()

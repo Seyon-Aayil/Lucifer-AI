@@ -18,6 +18,7 @@ import uuid
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 
 from master.agents.base.agent import AgentSurface
+from master.api.middleware.content_policy import ContentPolicyValidator
 from master.api.middleware.pii_scanner import PIIScanner
 from master.api.schemas import ChatChunk, ChatRequest, ChatResponse, Surface, TokenUsageSchema
 from master.core.exceptions import PIIDetectedError
@@ -32,7 +33,10 @@ tracer = get_tracer(__name__)
 
 # Shared instances (initialised once per worker process)
 _pii_scanner = PIIScanner(use_ner=False)  # NER enabled in prod via config
-_graph = build_graph()
+_content_policy = ContentPolicyValidator()
+# Fallback in-memory graph used when AsyncPostgresSaver is not yet available
+# (e.g. during tests or before the lifespan sets app.state.graph).
+_graph_fallback = build_graph()
 
 _SURFACE_MAP: dict[Surface, AgentSurface] = {
     Surface.WATCH: AgentSurface.WATCH,
@@ -51,10 +55,34 @@ async def _check_pii(message: str, allow_pii: bool) -> None:
         await loop.run_in_executor(None, _pii_scanner.scan_or_raise, message, "chat.message")
 
 
+async def _check_content_policy(text: str, direction: str) -> None:
+    """Raise HTTPException 422 if the text violates content policy."""
+    from fastapi import HTTPException
+
+    loop = asyncio.get_running_loop()
+    if direction == "input":
+        result = await loop.run_in_executor(None, _content_policy.validate_input, text)
+    else:
+        result = await loop.run_in_executor(None, _content_policy.validate_output, text)
+
+    if not result.allowed:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": f"content_policy_{result.check}", "message": result.violation},
+        )
+
+
 from typing import Any
 
 
-async def _run_graph(state: OrchestratorState, mcp_registry: Any = None) -> OrchestratorState:
+def _get_graph(request: Request) -> Any:
+    """Return the Postgres-backed graph from app state, falling back to in-memory."""
+    return getattr(request.app.state, "graph", _graph_fallback)
+
+
+async def _run_graph(
+    state: OrchestratorState, request: Request, mcp_registry: Any = None
+) -> OrchestratorState:
     """Run the LangGraph orchestrator and return final state."""
     config: dict[str, Any] = {
         "configurable": {
@@ -62,7 +90,8 @@ async def _run_graph(state: OrchestratorState, mcp_registry: Any = None) -> Orch
             "mcp_registry": mcp_registry,
         }
     }
-    result: OrchestratorState = await _graph.ainvoke(state, config=config)  # type: ignore[arg-type,call-overload]
+    graph = _get_graph(request)
+    result: OrchestratorState = await graph.ainvoke(state, config=config)  # type: ignore[arg-type,call-overload]
     return result
 
 
@@ -83,6 +112,7 @@ async def chat(
         allow_pii = request.headers.get("X-Lucifer-Allow-PII", "false").lower() == "true"
         try:
             await _check_pii(body.message, allow_pii)
+            await _check_content_policy(body.message, "input")
         except PIIDetectedError as exc:
             from fastapi import HTTPException
             raise HTTPException(status_code=422, detail={"error": "pii_detected", "message": str(exc)})
@@ -107,7 +137,7 @@ async def chat(
 
         mcp_registry = getattr(request.app.state, "mcp_registry", None)
         try:
-            final_state = await _run_graph(initial_state, mcp_registry=mcp_registry)
+            final_state = await _run_graph(initial_state, request, mcp_registry=mcp_registry)
         except Exception as exc:
             log.error("chat.orchestrator.failed", error=str(exc), trace_id=trace_id)
             from fastapi import HTTPException
@@ -116,6 +146,8 @@ async def chat(
         latency_ms = int((time.monotonic() - start) * 1000)
         agent_id = final_state.get("agent_id", "personal-agent")
         response_text = final_state.get("final_output", "")
+
+        await _check_content_policy(response_text, "output")
 
         log.info(
             "chat.completed",
@@ -175,6 +207,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
             }
 
             mcp_registry = getattr(websocket.app.state, "mcp_registry", None)
+            ws_graph = getattr(websocket.app.state, "graph", _graph_fallback)
             try:
                 # Stream graph execution events
                 config: dict[str, Any] = {
@@ -183,7 +216,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                         "mcp_registry": mcp_registry,
                     }
                 }
-                async for event in _graph.astream_events(initial_state, config=config, version="v2"):  # type: ignore[arg-type,attr-defined]
+                async for event in ws_graph.astream_events(initial_state, config=config, version="v2"):  # type: ignore[arg-type,attr-defined]
                     if event["event"] == "on_chain_stream":
                         chunk_data = event.get("data", {}).get("chunk", {})
                         if isinstance(chunk_data, dict):

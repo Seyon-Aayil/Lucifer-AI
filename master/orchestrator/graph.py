@@ -278,12 +278,21 @@ _agent_pool: AgentPool = AgentPool.build_default()
 # ── Graph Construction ────────────────────────────────────────────────────────
 
 
-def build_graph() -> Any:
+def build_graph(checkpointer: Any = None) -> Any:
     """
     Build and compile the Lucifer orchestration graph.
-    Returns a compiled StateGraph ready for invocation.
+
+    Args:
+        checkpointer: LangGraph checkpointer instance. Defaults to in-memory
+            MemorySaver. Pass an AsyncPostgresSaver from the FastAPI lifespan
+            for persistent multi-turn conversation state.
+
+    Returns:
+        A compiled StateGraph ready for invocation.
     """
-    from langgraph.checkpoint.memory import MemorySaver # Note: Phase 1 Week 5-6 switch to AsyncPostgresSaver
+    if checkpointer is None:
+        from langgraph.checkpoint.memory import MemorySaver
+        checkpointer = MemorySaver()
 
     graph = StateGraph(OrchestratorState)
 
@@ -306,17 +315,23 @@ def build_graph() -> Any:
     graph.add_edge("route", "execute")
 
     # Conditional: execute → hitl or synthesize
-    graph.add_conditional_edges("execute", _should_hitl, {"hitl": "hitl", "synthesize": "synthesize", "error_sink": "error_sink"})
+    graph.add_conditional_edges(
+        "execute", _should_hitl,
+        {"hitl": "hitl", "synthesize": "synthesize", "error_sink": "error_sink"},
+    )
 
     # Conditional: hitl → synthesize or error_sink
-    graph.add_conditional_edges("hitl", _hitl_approved, {"synthesize": "synthesize", "error_sink": "error_sink"})
+    graph.add_conditional_edges(
+        "hitl", _hitl_approved,
+        {"synthesize": "synthesize", "error_sink": "error_sink"},
+    )
 
     # Final linear edges
     graph.add_edge("synthesize", "memory_write")
     graph.add_edge("memory_write", END)
     graph.add_edge("error_sink", END)
 
-    return graph.compile(checkpointer=MemorySaver())
+    return graph.compile(checkpointer=checkpointer)
 
 
 _INTENT_CANDIDATES: list[tuple[str, str, RiskTier]] = [
