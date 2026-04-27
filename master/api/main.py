@@ -17,6 +17,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from redis.asyncio import Redis
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+from master.agents.librarian.decay_scheduler import DecayScheduler
+from master.agents.librarian.graph_client import GraphClient
 from master.api.middleware.auth import AuthMiddleware
 from master.api.routers import auth, chat, health
 from master.core.auth.revocation import RevocationStore
@@ -62,6 +66,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.mcp_registry = mcp_registry
     log.info("mcp_registry.ready")
 
+    # ── Memory Decay Scheduler ───────────────────────────────────────────────
+    graph_client = GraphClient.from_settings()
+    decay_scheduler = DecayScheduler(graph_client)
+    scheduler = AsyncIOScheduler()
+    decay_scheduler.attach(scheduler)
+    scheduler.start()
+    app.state.scheduler = scheduler
+    app.state.graph_client = graph_client
+    log.info("decay_scheduler.ready")
+
     # ── NATS JetStream ───────────────────────────────────────────────────────
     nc = await nats.connect(settings.nats_url)
     js = nc.jetstream()
@@ -89,6 +103,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     log.info("lucifer.shutdown")
+    scheduler.shutdown(wait=False)
+    await graph_client.close()
     await mcp_registry.disconnect_all()
     await nc.drain()
     await db_pool.close()

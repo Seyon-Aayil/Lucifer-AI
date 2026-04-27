@@ -214,25 +214,28 @@ async def synthesize_node(state: OrchestratorState) -> dict[str, Any]:
 
 async def memory_write_node(state: OrchestratorState) -> dict[str, Any]:
     """
-    Apply memory_deltas to the knowledge graph via LibrarianAgent.
-    Publishes deltas to NATS 'memory.delta.*' for async processing.
+    Apply memory_deltas to all three stores (Neo4j, Mem0, Zep) via MemoryWriter.
     """
     with tracer.start_as_current_span("orchestrator.memory_write"):
         deltas = state.get("memory_deltas", [])
-        if deltas:
-            log.info("orchestrator.memory_write", delta_count=len(deltas))
-            from master.agents.librarian.graph_client import GraphClient
-            try:
-                gc = GraphClient.from_settings()
-                for delta in deltas:
-                    if delta.operation == "upsert" and delta.node_type and delta.node_id:
-                        await gc.upsert_node(delta.node_type, delta.node_id, delta.attributes)
-                    elif delta.operation == "edge_upsert" and delta.from_node_id and delta.to_node_id and delta.edge_relation:
-                        await gc.upsert_edge(delta.from_node_id, delta.to_node_id, delta.edge_relation)
-                await gc.close()
-            except Exception as e:
-                log.error("orchestrator.memory_write_failed", error=str(e))
-                
+        if not deltas:
+            return {"memory_written": True}
+
+        from master.agents.librarian.graph_client import GraphClient
+        from master.agents.librarian.memory_writer import MemoryWriter
+
+        log.info("orchestrator.memory_write", delta_count=len(deltas))
+        try:
+            gc = GraphClient.from_settings()
+            writer = MemoryWriter(graph_client=gc)
+            await writer.apply_deltas(
+                deltas,
+                agent_id=state.get("agent_id", ""),
+            )
+            await gc.close()
+        except Exception as exc:
+            log.error("orchestrator.memory_write_failed", error=str(exc))
+
         return {"memory_written": True}
 
 

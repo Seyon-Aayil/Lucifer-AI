@@ -348,18 +348,18 @@ Priority order:
    - Agent manifests created for financial and health agents ✅
    - Status: **Done**
 
-3. **LibrarianAgent Full Wiring** (`master/agents/librarian/`)
-   - `mem0_client.py` — Real Mem0 API integration (episodic memory)
-   - `zep_client.py` — Real Zep/Graphiti API integration (temporal graph)
-   - `context_builder.py` — Interface wired; async `build()` returns `ContextPackage`; Neo4j/Mem0/Zep queries pending ✅ (interface done)
-   - `memory_writer.py` — Apply `MemoryDelta` list to all three stores
-   - `decay_scheduler.py` — APScheduler job for nightly decay pass
-   - Status: **Stubs in place — logic missing**
+3. **LibrarianAgent Full Wiring** (`master/agents/librarian/`) ✅
+   - `mem0_client.py` — `search()`, `add()`, `delete()` via Mem0 self-hosted REST API ✅
+   - `zep_client.py` — `search()`, `add_episode()`, `ensure_session()` via Zep v2 REST API ✅
+   - `context_builder.py` — parallel fan-out to Neo4j + Mem0 + Zep; ACL-filtered nodes; plain-text summary capped at 800 chars ✅
+   - `memory_writer.py` — routes deltas by classification (standard→all stores, restricted→Neo4j+Zep only, secret→never); concurrent writes with partial-failure logging ✅
+   - `decay_scheduler.py` — exponential decay (halves every ~7 days); soft-deletes below 0.05 threshold; `attach()` hooks into AsyncIOScheduler; wired into FastAPI lifespan ✅
+   - Status: **Done**
 
-4. **Orchestrator Real LibrarianClient** (`master/orchestrator/graph.py`)
-   - `context_inject_node`: wired to `ContextBuilder(GraphClient)` with graceful fallback ✅
-   - `memory_write_node`: replace direct GraphClient call with `librarian.apply_deltas(memory_deltas)` to write across all three stores
-   - Status: **Partially done — memory_write_node still uses direct GraphClient**
+4. **Orchestrator Real LibrarianClient** (`master/orchestrator/graph.py`) ✅
+   - `context_inject_node`: `ContextBuilder(GraphClient)` with graceful Neo4j fallback ✅
+   - `memory_write_node`: uses `MemoryWriter.apply_deltas()` — writes to Neo4j + Mem0 + Zep ✅
+   - Status: **Done**
 
 5. **AsyncPostgresSaver Checkpointer** (`master/orchestrator/graph.py`)
    - Replace `MemorySaver()` with `AsyncPostgresSaver` for persistent multi-turn conversation state
