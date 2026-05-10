@@ -29,7 +29,7 @@ pub mod commands;
 pub mod state;
 pub mod types;
 
-pub use state::ClientHandle;
+pub use state::{ClientHandle, EdgeStoreHandle, OfflineQueueHandle};
 pub use types::{ConnectArgs, ConnectError, TelemetryEvent};
 
 // `handlers!()` is the macro-based replacement for `tauri::generate_handler!`.

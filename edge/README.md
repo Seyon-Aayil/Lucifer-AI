@@ -101,6 +101,33 @@ await invoke("connect_master", { args: {
 const manifest = await invoke("get_hot_subgraph", { deviceId: "device-mac-01", lastSyncAtMs: 0 });
 ```
 
+## macOS production bundle
+
+```sh
+# Unsigned dev .app + .dmg (good for local install)
+make edge-frontend-build
+cd edge && cargo install --locked tauri-cli@^2 --quiet  # one-time
+cd edge && cargo tauri build --no-bundle                 # binary only
+cd edge && cargo tauri build                              # full .app + .dmg
+
+# Signed + notarised (Apple Developer Account required)
+export APPLE_CERTIFICATE="<base64 of .p12>"
+export APPLE_CERTIFICATE_PASSWORD="<p12 password>"
+export APPLE_SIGNING_IDENTITY="Developer ID Application: <your name> (<team-id>)"
+export APPLE_ID="<apple-id>"
+export APPLE_PASSWORD="<app-specific password>"
+export APPLE_TEAM_ID="<team-id>"
+cd edge && cargo tauri build
+```
+
+Bundles land in `edge/target/release/bundle/{macos,dmg}/`.
+
+## CI
+
+`.github/workflows/edge.yml` runs on every push touching `edge/**`:
+fmt-check → clippy → test → build, then `pnpm install && tsc -b && vite build`
+for the frontend. Locked to the same Rust 1.81 toolchain the workspace pins.
+
 ## What's next
 
 - Tauri 2.0 binary crate (window, hotkey, menu-bar, icons) — host for the

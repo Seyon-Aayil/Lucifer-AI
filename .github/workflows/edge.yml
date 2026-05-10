@@ -1,0 +1,81 @@
+name: Edge (Rust + Frontend)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "edge/**"
+      - "infra/proto/**"
+      - ".github/workflows/edge.yml"
+  pull_request:
+    paths:
+      - "edge/**"
+      - "infra/proto/**"
+      - ".github/workflows/edge.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust:
+    name: Rust workspace
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: edge
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.81"
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: edge
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --no-fail-fast
+
+      - name: Build (debug)
+        run: cargo build --workspace
+
+  frontend:
+    name: Desktop frontend
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: edge/desktop/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: edge/desktop/frontend/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm run lint
+
+      - name: Build
+        run: pnpm run build

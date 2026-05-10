@@ -2126,6 +2126,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures",
+ "lucifer-edge-store",
+ "lucifer-offline-queue",
  "lucifer-sync-client",
  "serde",
  "serde_json",

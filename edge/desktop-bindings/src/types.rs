@@ -49,6 +49,12 @@ pub enum ConnectError {
     AlreadyConnected,
     #[error("sync client error: {0}")]
     Sync(#[from] lucifer_sync_client::Error),
+    #[error("edge-store error: {0}")]
+    Store(String),
+    #[error("offline-queue error: {0}")]
+    Queue(String),
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 impl serde::Serialize for ConnectError {

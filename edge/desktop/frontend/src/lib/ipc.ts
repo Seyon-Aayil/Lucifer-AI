@@ -54,10 +54,27 @@ function mockResponse<T>(cmd: string): T {
         manifest_hash: "mock",
         is_full_sync: false,
       } as unknown as T;
+    case "edge_store_stats":
+      return { node_count: 0, edge_count: 0, last_sync_at_ms: null } as unknown as T;
+    case "offline_queue_stats":
+      return { pending: 0, in_flight: 0, completed: 0, failed: 0 } as unknown as T;
     default:
       return undefined as unknown as T;
   }
 }
+
+export type EdgeStoreStats = {
+  node_count: number;
+  edge_count: number;
+  last_sync_at_ms: number | null;
+};
+
+export type OfflineQueueStats = {
+  pending: number;
+  in_flight: number;
+  completed: number;
+  failed: number;
+};
 
 export const ipc = {
   connectMaster: (args: ConnectArgs) => invoke<void>("connect_master", { args }),
@@ -67,5 +84,11 @@ export const ipc = {
     invoke<SubgraphSummary>("get_hot_subgraph", { deviceId, lastSyncAtMs }),
   pushTelemetry: (events: TelemetryEvent[]) =>
     invoke<number>("push_telemetry", { events }),
+
+  edgeStoreStats:   () => invoke<EdgeStoreStats>("edge_store_stats"),
+  offlineQueueStats: () => invoke<OfflineQueueStats>("offline_queue_stats"),
+  enqueueOfflineAction: (actionType: string, payload: string) =>
+    invoke<string>("enqueue_offline_action", { actionType, payload }),
+
   inTauri,
 };

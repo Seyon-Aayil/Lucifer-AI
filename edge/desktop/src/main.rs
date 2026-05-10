@@ -1,7 +1,7 @@
 // Avoid an extra console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use lucifer_desktop_bindings::{handlers, ClientHandle};
+use lucifer_desktop_bindings::{handlers, ClientHandle, EdgeStoreHandle, OfflineQueueHandle};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -26,10 +26,13 @@ fn main() {
                 .build(),
         )
         .manage(ClientHandle::default())
+        .manage(EdgeStoreHandle::default())
+        .manage(OfflineQueueHandle::default())
         .invoke_handler(handlers!())
         .setup(|app| {
             register_overlay_shortcut(app.handle())?;
             install_tray(app.handle())?;
+            open_default_local_stores(app.handle());
             tracing::info!("Lucifer ready · ⌘+Space toggles overlay");
             Ok(())
         })
@@ -107,6 +110,36 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+fn open_default_local_stores(app: &tauri::AppHandle) {
+    let app_dir = match app.path().app_data_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not resolve app data dir");
+            return;
+        }
+    };
+    if !app_dir.exists() {
+        if let Err(e) = std::fs::create_dir_all(&app_dir) {
+            tracing::warn!(error = %e, "could not create app data dir");
+            return;
+        }
+    }
+
+    let store: EdgeStoreHandle = (*app.state::<EdgeStoreHandle>()).clone();
+    let queue: OfflineQueueHandle = (*app.state::<OfflineQueueHandle>()).clone();
+    let store_path = app_dir.join("edge_store.db");
+    let queue_path = app_dir.join("offline_queue.db");
+
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = store.open(store_path.clone()).await {
+            tracing::warn!(path = %store_path.display(), error = %e, "edge-store open failed");
+        }
+        if let Err(e) = queue.open(queue_path.clone()).await {
+            tracing::warn!(path = %queue_path.display(), error = %e, "offline-queue open failed");
+        }
+    });
 }
 
 fn init_tracing() {

@@ -15,6 +15,8 @@ tauri-cmd = ["dep:tauri"]
 
 [dependencies]
 lucifer-sync-client = { path = "../sync-client" }
+lucifer-edge-store = { path = "../edge-store" }
+lucifer-offline-queue = { path = "../offline-queue" }
 tauri = { workspace = true, optional = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }

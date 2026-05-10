@@ -2,10 +2,13 @@
 //! directly without a Tauri context. The `#[tauri::command]` glue lives in the
 //! `__handlers` submodule and is gated behind the `tauri-cmd` feature.
 
+use std::path::PathBuf;
+
+use lucifer_offline_queue::ActionStatus;
 use lucifer_sync_client::SyncClient;
 
 use crate::{
-    state::ClientHandle,
+    state::{ClientHandle, EdgeStoreHandle, OfflineQueueHandle},
     types::{ConnectArgs, ConnectError, TelemetryEvent},
 };
 
@@ -61,6 +64,69 @@ pub async fn get_hot_subgraph(
             })
         })
         .await
+}
+
+// ── Edge store ───────────────────────────────────────────────────────────────
+
+pub async fn open_edge_store(handle: &EdgeStoreHandle, path: String) -> Result<(), ConnectError> {
+    handle.open(PathBuf::from(path)).await
+}
+
+pub async fn edge_store_stats(handle: &EdgeStoreHandle) -> Result<serde_json::Value, ConnectError> {
+    handle
+        .with_blocking(|store| {
+            Ok(serde_json::json!({
+                "node_count":      store.count_nodes().unwrap_or(0),
+                "edge_count":      store.count_edges().unwrap_or(0),
+                "last_sync_at_ms": store.last_sync_at().unwrap_or(None),
+            }))
+        })
+        .await
+}
+
+// ── Offline queue ────────────────────────────────────────────────────────────
+
+pub async fn open_offline_queue(
+    handle: &OfflineQueueHandle,
+    path: String,
+) -> Result<(), ConnectError> {
+    handle.open(PathBuf::from(path)).await
+}
+
+pub async fn offline_queue_stats(
+    handle: &OfflineQueueHandle,
+) -> Result<serde_json::Value, ConnectError> {
+    handle
+        .with_blocking(|q| {
+            Ok(serde_json::json!({
+                "pending":   q.count_by_status(ActionStatus::Pending).unwrap_or(0),
+                "in_flight": q.count_by_status(ActionStatus::InFlight).unwrap_or(0),
+                "completed": q.count_by_status(ActionStatus::Completed).unwrap_or(0),
+                "failed":    q.count_by_status(ActionStatus::Failed).unwrap_or(0),
+            }))
+        })
+        .await
+}
+
+pub async fn enqueue_offline_action(
+    handle: &OfflineQueueHandle,
+    action_type: String,
+    payload: String,
+) -> Result<String, ConnectError> {
+    handle
+        .with_blocking(move |q| {
+            q.enqueue(&action_type, payload.as_bytes(), now_ms())
+                .map_err(|e| ConnectError::Queue(format!("enqueue: {e}")))
+        })
+        .await
+}
+
+fn now_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Fire a telemetry batch. Currently a stub that converts the JS payload but
@@ -123,6 +189,45 @@ pub mod __handlers {
         super::push_telemetry(handle.inner(), events).await
     }
 
+    #[tauri::command]
+    pub async fn open_edge_store(
+        handle: State<'_, EdgeStoreHandle>,
+        path: String,
+    ) -> Result<(), ConnectError> {
+        super::open_edge_store(handle.inner(), path).await
+    }
+
+    #[tauri::command]
+    pub async fn edge_store_stats(
+        handle: State<'_, EdgeStoreHandle>,
+    ) -> Result<serde_json::Value, ConnectError> {
+        super::edge_store_stats(handle.inner()).await
+    }
+
+    #[tauri::command]
+    pub async fn open_offline_queue(
+        handle: State<'_, OfflineQueueHandle>,
+        path: String,
+    ) -> Result<(), ConnectError> {
+        super::open_offline_queue(handle.inner(), path).await
+    }
+
+    #[tauri::command]
+    pub async fn offline_queue_stats(
+        handle: State<'_, OfflineQueueHandle>,
+    ) -> Result<serde_json::Value, ConnectError> {
+        super::offline_queue_stats(handle.inner()).await
+    }
+
+    #[tauri::command]
+    pub async fn enqueue_offline_action(
+        handle: State<'_, OfflineQueueHandle>,
+        action_type: String,
+        payload: String,
+    ) -> Result<String, ConnectError> {
+        super::enqueue_offline_action(handle.inner(), action_type, payload).await
+    }
+
     // Tauri's `generate_handler!` cannot be wrapped in a generic-returning fn
     // because the resulting type closes over `Builder`'s runtime parameter. The
     // recommended pattern is to call the macro directly at the call-site, e.g.
@@ -140,6 +245,11 @@ pub mod __handlers {
                 $crate::commands::__handlers::is_connected,
                 $crate::commands::__handlers::get_hot_subgraph,
                 $crate::commands::__handlers::push_telemetry,
+                $crate::commands::__handlers::open_edge_store,
+                $crate::commands::__handlers::edge_store_stats,
+                $crate::commands::__handlers::open_offline_queue,
+                $crate::commands::__handlers::offline_queue_stats,
+                $crate::commands::__handlers::enqueue_offline_action,
             ]
         };
     }
