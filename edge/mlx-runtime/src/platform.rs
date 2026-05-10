@@ -13,7 +13,9 @@ pub const fn is_apple_silicon() -> bool {
 
 /// Pick the best available local-inference backend.
 ///
-/// - On Apple Silicon with the `mlx` feature compiled in → [`Backend::Mlx`].
+/// - On Apple Silicon with the `mlx` feature compiled in AND the
+///   `LUCIFER_MLX_MODEL_DIR` env var pointing at a Llama-style model
+///   directory → [`Backend::Mlx`].
 /// - Otherwise → [`Backend::Ollama`].
 ///
 /// Always returns a working `Inference` impl; never panics.
@@ -21,12 +23,21 @@ pub fn select_backend(ollama_endpoint: &str) -> (Backend, Arc<dyn Inference>) {
     #[cfg(feature = "mlx")]
     {
         if is_apple_silicon() {
+            if let Ok(dir) = std::env::var("LUCIFER_MLX_MODEL_DIR") {
+                if !dir.is_empty() {
+                    tracing::info!(
+                        backend = "mlx",
+                        model_dir = %dir,
+                        "MLX backend selected for Apple Silicon host"
+                    );
+                    let inference = crate::mlx::MlxInference::new(std::path::PathBuf::from(dir));
+                    return (Backend::Mlx, Arc::new(inference));
+                }
+            }
             tracing::info!(
-                backend = "mlx",
-                "MLX backend selected for Apple Silicon host"
+                "Apple Silicon detected but LUCIFER_MLX_MODEL_DIR is unset — \
+                 falling back to Ollama backend"
             );
-            let inference = crate::mlx::MlxInference::new(ollama_endpoint.to_string());
-            return (Backend::Mlx, Arc::new(inference));
         }
     }
 

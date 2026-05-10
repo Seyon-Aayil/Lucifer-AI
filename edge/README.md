@@ -122,6 +122,54 @@ cd edge && cargo tauri build
 
 Bundles land in `edge/target/release/bundle/{macos,dmg}/`.
 
+## MLX backend (Apple Silicon)
+
+The `mlx-runtime` crate ships an Ollama-backed `Inference` impl by default.
+On Apple Silicon hosts you can opt into the on-device MLX runtime that
+loads a Llama-style model from disk and runs inference natively.
+
+### Prerequisites
+
+```sh
+# 1. cmake — required to compile mlx-rs's C++ runtime
+brew install cmake
+
+# 2. A Llama-style model directory containing:
+#    - config.json
+#    - tokenizer.json
+#    - model.safetensors
+# Tested layout: any HuggingFace `meta-llama/Llama-3.x-…` checkout works
+#                once converted to a single-file safetensors bundle.
+mkdir -p ~/.lucifer/models/llama3-3b
+# (place the three files in that directory)
+```
+
+### Build + run
+
+```sh
+# Build the workspace with the mlx feature on (~5–15 min first time)
+cd edge && cargo build -p lucifer-desktop --features lucifer-mlx-runtime/mlx
+
+# At launch, point the runtime at your model directory
+export LUCIFER_MLX_MODEL_DIR=~/.lucifer/models/llama3-3b
+./target/release/lucifer-desktop
+```
+
+When the env var is set + the feature is on + the host is Apple Silicon,
+the desktop binary picks the MLX backend over Ollama. Otherwise the
+Ollama path is used (no behavioural difference for the WebView).
+
+### Status
+
+- ✅ Weight loader (safetensors → mlx Array, F32/F16/BF16)
+- ✅ Tokenizer (HuggingFace `tokenizers`)
+- ✅ Generation loop, KV cache, greedy sampling, async streaming via
+  `spawn_blocking` + `UnboundedReceiverStream`
+- ⏳ Transformer forward pass (pending — see TODO in
+  `edge/mlx-runtime/src/mlx.rs::forward_step`); the surrounding loader
+  + plumbing is production-shaped so finishing the math is a single
+  function
+
 ## CI
 
 `.github/workflows/edge.yml` runs on every push touching `edge/**`:

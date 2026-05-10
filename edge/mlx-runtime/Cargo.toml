@@ -8,11 +8,11 @@ repository.workspace = true
 description = "Apple-Silicon MLX inference backend for the Lucifer edge clients with an Ollama fallback for non-Apple-Silicon hosts."
 
 [features]
-# `mlx` enables a real MLX implementation (link against the C++ runtime).
-# Off by default until the upstream `mlx-rs` build deps are vendored; the
-# crate still compiles and routes through the Ollama fallback.
+# `mlx` enables the real MLX implementation. Requires `cmake` on $PATH and
+# Apple Silicon hardware. Off by default so non-Apple-Silicon checkouts (and
+# CI runners without cmake) keep building.
 default = []
-mlx = []
+mlx = ["dep:mlx-rs", "dep:tokenizers", "dep:safetensors"]
 
 [dependencies]
 lucifer-ollama-sidecar = { path = "../ollama-sidecar" }
@@ -23,6 +23,10 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+mlx-rs = { version = "0.25", optional = true }
+tokenizers = { version = "0.23", default-features = false, features = ["onig"], optional = true }
+safetensors = { version = "0.7", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
