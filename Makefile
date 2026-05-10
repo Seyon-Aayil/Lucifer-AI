@@ -1,7 +1,7 @@
 # Lucifer AI — Dev Stack Makefile
 # Usage: make <target>
 
-.PHONY: up down reset test lint typecheck migrate proto clean help edge-build edge-test edge-lint edge-cli
+.PHONY: up down reset test lint typecheck migrate proto clean help edge-build edge-test edge-lint edge-cli edge-desktop edge-desktop-release edge-desktop-run
 
 # ─── Colours ────────────────────────────────────────────────────────────────
 CYAN  := \033[0;36m
@@ -122,6 +122,17 @@ edge-lint: ## Format + clippy the Rust edge workspace
 edge-cli: ## Build the lucifer-edge CLI binary
 	cd edge && cargo build --release -p lucifer-edge-cli
 	@echo "Built: edge/target/release/lucifer-edge"
+
+edge-desktop: ## Build the Lucifer Tauri desktop app (debug)
+	cd edge && cargo build -p lucifer-desktop
+	@echo "Built: edge/target/debug/lucifer-desktop"
+
+edge-desktop-release: ## Build the Lucifer Tauri desktop app (release, no bundling)
+	cd edge && cargo build --release -p lucifer-desktop
+	@echo "Built: edge/target/release/lucifer-desktop"
+
+edge-desktop-run: ## Run the Lucifer Tauri desktop app from source
+	cd edge && cargo run -p lucifer-desktop
 
 # ─── Install ─────────────────────────────────────────────────────────────────
 install: ## Install Python deps in editable mode with dev extras

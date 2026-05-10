@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capability set for the Lucifer main window. Grants the IPC commands exposed by lucifer-desktop-bindings plus Tauri core defaults.","local":true,"windows":["main"],"permissions":["core:default"]}}

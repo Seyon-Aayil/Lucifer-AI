@@ -42,8 +42,15 @@ edge/
 │       ├── client.rs      # list / pull / generate / chat (streaming)
 │       ├── types.rs       # ChatMessage / GenerateChunk / ModelInfo
 │       └── error.rs       # typed errors
-└── edge-cli/              # `lucifer-edge` integration-test CLI
-    └── src/main.rs        # subcommands: ping / store-stats / enqueue / claim / ollama-*
+├── edge-cli/              # `lucifer-edge` integration-test CLI
+│   └── src/main.rs        # subcommands: ping / store-stats / enqueue / claim / ollama-*
+└── desktop/               # Tauri 2.0 binary shell (macOS first)
+    ├── Cargo.toml         # depends on desktop-bindings, sync-client
+    ├── tauri.conf.json    # window, identifier, icon paths, bundle targets
+    ├── build.rs           # tauri_build::build()
+    ├── src/main.rs        # builder + manage(ClientHandle) + handlers!()
+    ├── icons/             # 32/128/128@2x PNG (RGBA), icon.icns, icon.ico
+    └── dist/index.html    # static frontend (will be replaced with Stitch UI)
 ```
 
 ## Build
