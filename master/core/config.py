@@ -127,6 +127,8 @@ class Settings(BaseSettings):
     pairing_ca_key_path: str = "infra/certs/ca.key"
     pairing_code_ttl_seconds: int = 60
     pairing_cert_validity_days: int = 365
+    pairing_rate_limit_per_window: int = 5
+    pairing_rate_limit_window_seconds: int = 60
     grpc_sync_enabled: bool = True
     sync_max_subgraph_bytes: int = 50 * 1024 * 1024  # 50 MiB
     sync_max_offline_actions: int = 10_000

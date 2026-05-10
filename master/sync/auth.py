@@ -84,7 +84,11 @@ class DeviceAuthInterceptor(grpc.aio.ServerInterceptor):
         handler = await continuation(handler_call_details)
         if handler is None:
             return None
-        return _wrap_handler(handler, CallerIdentity(device_id=device_id, jti=jti))
+        return _wrap_handler(
+            handler,
+            CallerIdentity(device_id=device_id, jti=jti),
+            self._revocation,
+        )
 
     @classmethod
     def _reject(cls, message: str) -> grpc.RpcMethodHandler:
@@ -110,33 +114,53 @@ class DeviceAuthInterceptor(grpc.aio.ServerInterceptor):
 def _wrap_handler(
     handler: grpc.RpcMethodHandler,
     identity: CallerIdentity,
+    revocation_store: RevocationStore,
 ) -> grpc.RpcMethodHandler:
-    """Wrap each behaviour to set the caller contextvar before invocation."""
+    """
+    Wrap each behaviour to:
+      1. Set the caller contextvar so the servicer can read `current_caller`.
+      2. Verify the peer mTLS cert serial isn't on the revocation set —
+         per-cert kill-switch independent of JWT lifetime.
+    """
 
-    def wrap(behavior):
-        if behavior is None:
-            return None
-
-        async def unary(request, context):
-            current_caller.set(identity)
-            return await behavior(request, context)
-
-        async def stream(request_iterator, context):
-            current_caller.set(identity)
-            async for response in behavior(request_iterator, context):
-                yield response
-
-        return unary if not handler.request_streaming and not handler.response_streaming else stream
+    async def _verify_peer_cert(context: grpc.aio.ServicerContext) -> bool:
+        serial = _peer_cert_serial(context)
+        if serial is None:
+            # No peer cert exposed (insecure dev channel) — JWT path is the
+            # only auth gate; allow.
+            return True
+        if await revocation_store.is_cert_serial_revoked(serial):
+            log.warning(
+                "sync.auth.cert_revoked",
+                serial=hex(serial),
+                device_id=identity.device_id,
+            )
+            await context.abort(
+                grpc.StatusCode.UNAUTHENTICATED,
+                f"client cert serial {hex(serial)} is revoked",
+            )
+            return False
+        return True
 
     if handler.request_streaming and handler.response_streaming:
+
+        async def stream_stream(request_iterator, context):
+            if not await _verify_peer_cert(context):
+                return
+            current_caller.set(identity)
+            async for response in handler.stream_stream(request_iterator, context):
+                yield response
+
         return grpc.stream_stream_rpc_method_handler(
-            wrap(handler.stream_stream),
+            stream_stream,
             request_deserializer=handler.request_deserializer,
             response_serializer=handler.response_serializer,
         )
     if handler.request_streaming:
 
         async def stream_unary(request_iterator, context):
+            if not await _verify_peer_cert(context):
+                return None
             current_caller.set(identity)
             return await handler.stream_unary(request_iterator, context)
 
@@ -148,6 +172,8 @@ def _wrap_handler(
     if handler.response_streaming:
 
         async def unary_stream(request, context):
+            if not await _verify_peer_cert(context):
+                return
             current_caller.set(identity)
             async for response in handler.unary_stream(request, context):
                 yield response
@@ -159,6 +185,8 @@ def _wrap_handler(
         )
 
     async def unary_unary(request, context):
+        if not await _verify_peer_cert(context):
+            return None
         current_caller.set(identity)
         return await handler.unary_unary(request, context)
 
@@ -167,3 +195,30 @@ def _wrap_handler(
         request_deserializer=handler.request_deserializer,
         response_serializer=handler.response_serializer,
     )
+
+
+def _peer_cert_serial(context) -> int | None:
+    """
+    Extract the peer mTLS certificate's serial number from a gRPC servicer
+    context. Returns `None` if no peer cert is present (insecure channel
+    used in dev) or the cert can't be parsed.
+    """
+    try:
+        auth = context.auth_context() if hasattr(context, "auth_context") else {}
+    except Exception:  # noqa: BLE001 — gRPC raises a wide set of types
+        return None
+    pem_chain = auth.get("x509_pem_cert") if auth else None
+    if not pem_chain:
+        return None
+    pem = pem_chain[0] if isinstance(pem_chain, list) else pem_chain
+    if isinstance(pem, bytes):
+        pem_bytes = pem
+    else:
+        pem_bytes = str(pem).encode()
+    try:
+        from cryptography import x509  # local import to keep grpc-only callers happy
+
+        cert = x509.load_pem_x509_certificate(pem_bytes)
+        return int(cert.serial_number)
+    except Exception:  # noqa: BLE001
+        return None

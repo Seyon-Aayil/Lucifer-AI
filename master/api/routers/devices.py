@@ -27,12 +27,15 @@ import secrets
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from redis.asyncio import Redis
 
 from master.core.auth.cert_mint import mint_client_credentials
 from master.core.auth.device_pairing import PairingCodeStore
 from master.core.auth.jwt import create_access_token
+from master.core.auth.rate_limit import FixedWindowRateLimiter
+from master.core.auth.revocation import RevocationStore
 from master.core.config import get_settings
 from master.core.logging import get_logger
 
@@ -83,6 +86,26 @@ class PairRequest(BaseModel):
         return v
 
 
+class RevokeRequest(BaseModel):
+    cert_serial_hex: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="Hex serial number returned by /devices/pair (with or without leading 0x).",
+    )
+    device_id: str | None = Field(default=None, max_length=128)
+
+
+class RevokeResponse(BaseModel):
+    cert_serial_hex: str
+    revoked_at: str
+
+
+class RevokedListResponse(BaseModel):
+    serials: list[str]
+    count: int
+
+
 class PairResponse(BaseModel):
     device_id: str
     jwt: str
@@ -112,6 +135,37 @@ def _redis_dep(request: Request) -> Redis:
 
 def _pairing_store(redis: Annotated[Redis, Depends(_redis_dep)]) -> PairingCodeStore:
     return PairingCodeStore(redis)
+
+
+def _revocation_store(redis: Annotated[Redis, Depends(_redis_dep)]) -> RevocationStore:
+    return RevocationStore(redis)
+
+
+def _pairing_rate_limiter(
+    redis: Annotated[Redis, Depends(_redis_dep)],
+) -> FixedWindowRateLimiter:
+    settings = get_settings()
+    return FixedWindowRateLimiter(
+        redis,
+        limit=settings.pairing_rate_limit_per_window,
+        window_seconds=settings.pairing_rate_limit_window_seconds,
+        namespace="pair",
+    )
+
+
+def _client_ip(request: Request) -> str:
+    """
+    Best-effort client IP for rate-limit keying. Honours `X-Forwarded-For`
+    when the master sits behind a trusted reverse proxy; falls back to the
+    raw socket peer.
+    """
+    fwd = request.headers.get("x-forwarded-for", "").strip()
+    if fwd:
+        # First entry is the original client; rest are proxies.
+        return fwd.split(",")[0].strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
 
 
 def _require_admin(authorization: Annotated[str | None, Header()] = None) -> None:
@@ -161,9 +215,20 @@ async def mint_pairing_code(
     summary="Exchange a 6-digit code for a JWT + freshly-minted client cert.",
 )
 async def pair_device(
+    request: Request,
     body: PairRequest,
     store: Annotated[PairingCodeStore, Depends(_pairing_store)],
+    limiter: Annotated[FixedWindowRateLimiter, Depends(_pairing_rate_limiter)],
 ) -> PairResponse:
+    decision = await limiter.check(_client_ip(request))
+    if not decision.allowed:
+        log.warning("device_pairing.rate_limited", ip=_client_ip(request))
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too many pairing attempts; try again later",
+            headers={"Retry-After": str(decision.retry_after_seconds)},
+        )
+
     issued_for = await store.verify(body.code)
     if issued_for is None:
         log.info("device_pairing.code.invalid", device_id=body.device_id)
@@ -202,3 +267,58 @@ async def pair_device(
         cert_not_after=creds.not_after.isoformat(),
         common_name=creds.common_name,
     )
+
+
+# ── Revocation (operator-only) ───────────────────────────────────────────────
+
+
+def _normalize_serial(raw: str) -> int:
+    s = raw.strip().lower()
+    if s.startswith("0x"):
+        s = s[2:]
+    if not s or any(c not in "0123456789abcdef" for c in s):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="cert_serial_hex must be a hex string",
+        )
+    return int(s, 16)
+
+
+@router.post(
+    "/devices/admin/revoke",
+    response_model=RevokeResponse,
+    dependencies=[Depends(_require_admin)],
+    summary="Revoke a per-device client cert by its serial (operator-only).",
+)
+async def revoke_cert(
+    body: RevokeRequest,
+    revocation: Annotated[RevocationStore, Depends(_revocation_store)],
+) -> RevokeResponse:
+    import datetime as _dt
+
+    serial_int = _normalize_serial(body.cert_serial_hex)
+    await revocation.revoke_cert_serial(serial_int)
+    if body.device_id:
+        await revocation.revoke_device(body.device_id)
+    return RevokeResponse(
+        cert_serial_hex=f"{serial_int:x}",
+        revoked_at=_dt.datetime.now(_dt.UTC).isoformat(),
+    )
+
+
+@router.get(
+    "/devices/admin/revoked",
+    response_model=RevokedListResponse,
+    dependencies=[Depends(_require_admin)],
+    summary="List currently-revoked cert serial numbers (operator-only).",
+)
+async def list_revoked(
+    revocation: Annotated[RevocationStore, Depends(_revocation_store)],
+) -> RevokedListResponse:
+    serials = await revocation.list_revoked_cert_serials()
+    return RevokedListResponse(serials=serials, count=len(serials))
+
+
+# Suppress an "unused import" warning when JSONResponse isn't referenced
+# directly (FastAPI returns models above).
+_ = JSONResponse

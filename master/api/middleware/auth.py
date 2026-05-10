@@ -40,6 +40,8 @@ EXEMPT_PATHS: frozenset[str] = frozenset(
         "/auth/token/refresh",
         "/devices/pair",
         "/devices/admin/code",
+        "/devices/admin/revoke",
+        "/devices/admin/revoked",
         "/admin/devices",
     }
 )
