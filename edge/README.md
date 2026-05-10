@@ -49,8 +49,17 @@ edge/
     ├── tauri.conf.json    # window, identifier, icon paths, bundle targets
     ├── build.rs           # tauri_build::build()
     ├── src/main.rs        # builder + manage(ClientHandle) + handlers!()
+    ├── capabilities/      # Tauri 2.0 ACL grants (default.json)
     ├── icons/             # 32/128/128@2x PNG (RGBA), icon.icns, icon.ico
-    └── dist/index.html    # static frontend (will be replaced with Stitch UI)
+    ├── dist/              # built frontend bundle (React/Vite output)
+    └── frontend/          # Vite + React + TS source
+        ├── package.json   # vite, react, react-router, @tauri-apps/api, tailwind
+        ├── tailwind.config.js  # design tokens (Lucifer Dark)
+        ├── src/lib/ipc.ts # typed wrappers around tauri invoke()
+        ├── src/lib/agents.ts   # 7-agent registry (color, label, blurb)
+        ├── src/components      # Sidebar, ConnectionBar
+        └── src/screens         # Conversation, HotkeyOverlay, MenuBar,
+                                # KnowledgeGraph, Approvals, Onboarding
 ```
 
 ## Build

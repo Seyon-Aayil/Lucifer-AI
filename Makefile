@@ -1,7 +1,7 @@
 # Lucifer AI — Dev Stack Makefile
 # Usage: make <target>
 
-.PHONY: up down reset test lint typecheck migrate proto clean help edge-build edge-test edge-lint edge-cli edge-desktop edge-desktop-release edge-desktop-run
+.PHONY: up down reset test lint typecheck migrate proto clean help edge-build edge-test edge-lint edge-cli edge-desktop edge-desktop-release edge-desktop-run edge-frontend-install edge-frontend-build edge-frontend-dev
 
 # ─── Colours ────────────────────────────────────────────────────────────────
 CYAN  := \033[0;36m
@@ -133,6 +133,15 @@ edge-desktop-release: ## Build the Lucifer Tauri desktop app (release, no bundli
 
 edge-desktop-run: ## Run the Lucifer Tauri desktop app from source
 	cd edge && cargo run -p lucifer-desktop
+
+edge-frontend-install: ## Install Lucifer desktop frontend npm deps (pnpm)
+	cd edge/desktop/frontend && pnpm install
+
+edge-frontend-build: ## Build the React frontend into edge/desktop/dist
+	cd edge/desktop/frontend && pnpm run build
+
+edge-frontend-dev: ## Run Vite dev server (http://localhost:1420) for hot-reload
+	cd edge/desktop/frontend && pnpm run dev
 
 # ─── Install ─────────────────────────────────────────────────────────────────
 install: ## Install Python deps in editable mode with dev extras
