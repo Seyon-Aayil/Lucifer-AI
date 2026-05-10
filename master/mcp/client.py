@@ -5,12 +5,13 @@ MCPClient: the single entry point for all MCP tool invocations.
 Enforces: schema validation → agent manifest check → transport call → audit log.
 Never call transport.call_tool() directly from agent code.
 """
+
 from __future__ import annotations
 
 import time
 from typing import Any
 
-import jsonschema  # type: ignore[import]
+import jsonschema
 
 from master.core.exceptions import (
     MCPPermissionError,
@@ -192,4 +193,4 @@ class MCPClient:
         except jsonschema.ValidationError as exc:
             raise MCPSchemaValidationError(
                 f"Input validation failed for tool '{tool_schema.name}': {exc.message}"
-            )
+            ) from exc

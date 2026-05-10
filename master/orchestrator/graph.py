@@ -10,12 +10,14 @@ Graph nodes (in order):
 HitL checkpoint: inserted automatically when risk_tier >= HIGH.
 Edges are conditional — failures route to an error_sink node.
 """
+
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
-from langgraph.checkpoint.memory import MemorySaver
+import httpx
 from langgraph.graph import END, START, StateGraph
 
 from master.agents.base.agent import (
@@ -37,15 +39,15 @@ _HITL_TIERS = {RiskTier.HIGH, RiskTier.CRITICAL}
 
 # ── Node Implementations ──────────────────────────────────────────────────────
 
+
 async def classify_node(state: OrchestratorState) -> dict[str, Any]:
     """
     Classify the raw input into: intent, agent_id, risk_tier.
-    Uses a lightweight local model or rule-based classifier for speed.
+    Uses a local Ollama model with rule-based fallback.
     """
     with tracer.start_as_current_span("orchestrator.classify"):
         raw = state.get("raw_input", "")
-        # TODO Phase 1 Week 5: replace with real intent classifier model
-        intent, agent_id, risk_tier = _simple_intent_classifier(raw)
+        intent, agent_id, risk_tier = await _ollama_intent_classifier(raw)
         requires_hitl = risk_tier in _HITL_TIERS
 
         log.info(
@@ -69,13 +71,22 @@ async def context_inject_node(state: OrchestratorState) -> dict[str, Any]:
     Package is ACL-filtered and token-budgeted by the Librarian.
     """
     with tracer.start_as_current_span("orchestrator.context_inject"):
-        # TODO Phase 1 Week 5-6: inject real LibrarianClient
+        agent_id = state.get("agent_id", "personal-agent")
+        intent = state.get("intent", "chat")
+
         from master.agents.base.agent import ContextPackage
-        context = ContextPackage(
-            requesting_agent=state.get("agent_id", "personal-agent"),
-            task_type=state.get("intent", "chat"),
-        )
-        log.debug("orchestrator.context_injected", agent=state.get("agent_id"))
+        from master.agents.librarian.context_builder import ContextBuilder
+        from master.agents.librarian.graph_client import GraphClient
+
+        context = ContextPackage(requesting_agent=agent_id, task_type=intent)
+        try:
+            gc = GraphClient.from_settings()
+            context = await ContextBuilder(gc).build(agent_id, intent)
+            await gc.close()
+        except Exception as exc:
+            log.warning("orchestrator.context_inject.fallback", error=str(exc))
+
+        log.debug("orchestrator.context_injected", agent=agent_id)
         return {"context_package": context}
 
 
@@ -86,7 +97,9 @@ async def budget_plan_node(state: OrchestratorState) -> dict[str, Any]:
     with tracer.start_as_current_span("orchestrator.budget_plan"):
         surface = state.get("surface", AgentSurface.WEB)
         budget = TokenBudget.for_surface(surface)
-        log.debug("orchestrator.budget_planned", inputs=budget.input_limit, outputs=budget.output_limit)
+        log.debug(
+            "orchestrator.budget_planned", inputs=budget.input_limit, outputs=budget.output_limit
+        )
         return {"token_budget": budget}
 
 
@@ -109,32 +122,41 @@ async def route_node(state: OrchestratorState) -> dict[str, Any]:
         return {"agent_request": request}
 
 
-async def execute_node(state: OrchestratorState) -> dict[str, Any]:
+async def execute_node(state: OrchestratorState, config: dict[str, Any]) -> dict[str, Any]:
     """
-    Dispatch the agent request to the selected agent and collect the response.
-    Agent pool is resolved at runtime from the registry.
+    Dispatch the agent request to the selected agent via AgentPool.
+    Falls back to PersonalAgent for unregistered agent IDs.
     """
     with tracer.start_as_current_span("orchestrator.execute"):
         request: AgentRequest = state["agent_request"]
-        
-        from master.agents.personal.agent import PersonalAgent
-        from master.llm.registry import ProviderRegistry
+
         from master.agents.base.agent import AgentResponse
-        
-        # Initialize components dynamically
+        from master.llm.registry import ProviderRegistry
+        from master.mcp.registry import MCPServerRegistry
+
         llm_registry = ProviderRegistry.from_settings()
-        
+
+        mcp_client = None
+        mcp_registry = (config or {}).get("configurable", {}).get("mcp_registry")
+        if mcp_registry is not None:
+            try:
+                manifest = MCPServerRegistry.load_manifest(request.agent_id)
+                mcp_client = mcp_registry.get_client(manifest)
+            except Exception as exc:
+                log.warning("execute_node.mcp_client_failed", error=str(exc))
+
         class OTelEmitter:
             def emit_event(self, **kwargs: Any) -> None:
                 log.info("agent.telemetry.event", **kwargs)
-            
-        agent = PersonalAgent(
-            agent_id=request.agent_id,
+
+        agent = _agent_pool.resolve(
+            request.agent_id,
             librarian=None,
             llm_registry=llm_registry,
-            telemetry_emitter=OTelEmitter()
+            telemetry_emitter=OTelEmitter(),
+            mcp_client=mcp_client,
         )
-        
+
         try:
             response = await agent.execute(request)
         except Exception as exc:
@@ -143,7 +165,7 @@ async def execute_node(state: OrchestratorState) -> dict[str, Any]:
                 task_id=request.task_id,
                 agent_id=request.agent_id,
                 status="error",
-                error_message=str(exc)
+                error_message=str(exc),
             )
 
         log.info("orchestrator.execute.done", agent=request.agent_id, status=response.status)
@@ -188,30 +210,36 @@ async def synthesize_node(state: OrchestratorState) -> dict[str, Any]:
         elif response and response.status == "escalate":
             content = f"This action requires approval: {response.escalation_reason}"
 
-        return {"final_output": content, "output_metadata": {"status": response.status if response else "error"}}
+        return {
+            "final_output": content,
+            "output_metadata": {"status": response.status if response else "error"},
+        }
 
 
 async def memory_write_node(state: OrchestratorState) -> dict[str, Any]:
     """
-    Apply memory_deltas to the knowledge graph via LibrarianAgent.
-    Publishes deltas to NATS 'memory.delta.*' for async processing.
+    Apply memory_deltas to all three stores (Neo4j, Mem0, Zep) via MemoryWriter.
     """
     with tracer.start_as_current_span("orchestrator.memory_write"):
         deltas = state.get("memory_deltas", [])
-        if deltas:
-            log.info("orchestrator.memory_write", delta_count=len(deltas))
-            from master.agents.librarian.graph_client import GraphClient
-            try:
-                gc = GraphClient.from_settings()
-                for delta in deltas:
-                    if delta.operation == "upsert" and delta.node_type and delta.node_id:
-                        await gc.upsert_node(delta.node_type, delta.node_id, delta.attributes)
-                    elif delta.operation == "edge_upsert" and delta.from_node_id and delta.to_node_id and delta.edge_relation:
-                        await gc.upsert_edge(delta.from_node_id, delta.to_node_id, delta.edge_relation)
-                await gc.close()
-            except Exception as e:
-                log.error("orchestrator.memory_write_failed", error=str(e))
-                
+        if not deltas:
+            return {"memory_written": True}
+
+        from master.agents.librarian.graph_client import GraphClient
+        from master.agents.librarian.memory_writer import MemoryWriter
+
+        log.info("orchestrator.memory_write", delta_count=len(deltas))
+        try:
+            gc = GraphClient.from_settings()
+            writer = MemoryWriter(graph_client=gc)
+            await writer.apply_deltas(
+                deltas,
+                agent_id=state.get("agent_id", ""),
+            )
+            await gc.close()
+        except Exception as exc:
+            log.error("orchestrator.memory_write_failed", error=str(exc))
+
         return {"memory_written": True}
 
 
@@ -226,6 +254,7 @@ async def error_sink_node(state: OrchestratorState) -> dict[str, Any]:
 
 
 # ── Routing Functions ─────────────────────────────────────────────────────────
+
 
 def _should_hitl(state: OrchestratorState) -> str:
     """After execute: route to hitl if escalation needed, error_sink if failed, else synthesize."""
@@ -244,15 +273,32 @@ def _hitl_approved(state: OrchestratorState) -> str:
     return "synthesize" if state.get("hitl_approved", False) else "error_sink"
 
 
+# ── Agent Pool (module-level singleton) ──────────────────────────────────────
+
+from master.orchestrator.agent_pool import AgentPool  # noqa: E402
+
+_agent_pool: AgentPool = AgentPool.build_default()
+
+
 # ── Graph Construction ────────────────────────────────────────────────────────
 
 
-def build_graph() -> Any:
+def build_graph(checkpointer: Any = None) -> Any:
     """
     Build and compile the Lucifer orchestration graph.
-    Returns a compiled StateGraph ready for invocation.
+
+    Args:
+        checkpointer: LangGraph checkpointer instance. Defaults to in-memory
+            MemorySaver. Pass an AsyncPostgresSaver from the FastAPI lifespan
+            for persistent multi-turn conversation state.
+
+    Returns:
+        A compiled StateGraph ready for invocation.
     """
-    from langgraph.checkpoint.memory import MemorySaver # Note: Phase 1 Week 5-6 switch to AsyncPostgresSaver
+    if checkpointer is None:
+        from langgraph.checkpoint.memory import MemorySaver
+
+        checkpointer = MemorySaver()
 
     graph = StateGraph(OrchestratorState)
 
@@ -275,22 +321,77 @@ def build_graph() -> Any:
     graph.add_edge("route", "execute")
 
     # Conditional: execute → hitl or synthesize
-    graph.add_conditional_edges("execute", _should_hitl, {"hitl": "hitl", "synthesize": "synthesize", "error_sink": "error_sink"})
+    graph.add_conditional_edges(
+        "execute",
+        _should_hitl,
+        {"hitl": "hitl", "synthesize": "synthesize", "error_sink": "error_sink"},
+    )
 
     # Conditional: hitl → synthesize or error_sink
-    graph.add_conditional_edges("hitl", _hitl_approved, {"synthesize": "synthesize", "error_sink": "error_sink"})
+    graph.add_conditional_edges(
+        "hitl",
+        _hitl_approved,
+        {"synthesize": "synthesize", "error_sink": "error_sink"},
+    )
 
     # Final linear edges
     graph.add_edge("synthesize", "memory_write")
     graph.add_edge("memory_write", END)
     graph.add_edge("error_sink", END)
 
-    return graph.compile(checkpointer=MemorySaver())
+    return graph.compile(checkpointer=checkpointer)
+
+
+_INTENT_CANDIDATES: list[tuple[str, str, RiskTier]] = [
+    ("chat", "personal-agent", RiskTier.LOW),
+    ("schedule_meeting", "personal-agent", RiskTier.MEDIUM),
+    ("summarise_calendar", "personal-agent", RiskTier.LOW),
+    ("daily_briefing", "personal-agent", RiskTier.LOW),
+    ("code_assist", "coding-agent", RiskTier.LOW),
+    ("health_query", "health-agent", RiskTier.MEDIUM),
+    ("financial_query", "financial-agent", RiskTier.HIGH),
+    ("research", "research-agent", RiskTier.LOW),
+]
+
+_INTENT_CLASSIFIER_PROMPT = (
+    "Classify the user input into one of these intent/agent/risk combinations:\n"
+    + "\n".join(f"- intent={i}, agent={a}, risk={r.value}" for i, a, r in _INTENT_CANDIDATES)
+    + '\n\nUser input: "{raw_input}"\n\n'
+    'Reply with JSON only: {{"intent": "...", "agent_id": "...", "risk_tier": "..."}}'
+)
+
+
+async def _ollama_intent_classifier(raw_input: str) -> tuple[str, str, RiskTier]:
+    """
+    Classify intent via a local Ollama model (mistral).
+    Falls back to rule-based classifier on any error or timeout.
+    """
+    from master.core.config import get_settings
+
+    settings = get_settings()
+    prompt = _INTENT_CLASSIFIER_PROMPT.format(raw_input=raw_input)
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.post(
+                f"{settings.ollama_base_url}/api/generate",
+                json={"model": "mistral", "prompt": prompt, "stream": False, "format": "json"},
+            )
+            resp.raise_for_status()
+            result: dict[str, Any] = json.loads(resp.json().get("response", "{}"))
+            intent = result.get("intent", "chat")
+            agent_id = result.get("agent_id", "personal-agent")
+            risk_str = result.get("risk_tier", "low")
+            valid_risk = {t.value for t in RiskTier}
+            risk_tier = RiskTier(risk_str) if risk_str in valid_risk else RiskTier.LOW
+            return intent, agent_id, risk_tier
+    except Exception as exc:
+        log.debug("orchestrator.classify.ollama_fallback", error=str(exc))
+        return _simple_intent_classifier(raw_input)
 
 
 def _simple_intent_classifier(raw_input: str) -> tuple[str, str, RiskTier]:
     """
-    Stub rule-based classifier used until the real model is integrated.
+    Rule-based fallback classifier. Used when Ollama is unavailable.
     Returns: (intent, agent_id, risk_tier).
     """
     text = raw_input.lower()

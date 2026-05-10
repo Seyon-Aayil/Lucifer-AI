@@ -1,0 +1,5 @@
+{
+  "agent_id": "financial-agent",
+  "description": "Financial assistant — spend tracking, budget alerts (HIGH risk, HitL always for writes)",
+  "allowed_tools": {}
+}

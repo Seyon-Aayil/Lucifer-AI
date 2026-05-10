@@ -5,6 +5,7 @@ Real-time agent spend tracker.
 Redis counters for hot-path daily spend; hourly flush to TimescaleDB.
 Raises BudgetExceededError when an agent hits its daily cap.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime

@@ -5,6 +5,7 @@ Shared pytest fixtures for all test suites.
 Unit tests: mock all external services.
 Integration tests: use real Docker services (mark with @pytest.mark.integration).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +17,9 @@ import pytest
 # Force test environment before any app code is imported
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-32-bytes-minimum!!")
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://lucifer:test@localhost:5432/lucifer_test")
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+asyncpg://lucifer:test@localhost:5432/lucifer_test"
+)
 os.environ.setdefault("NEO4J_PASSWORD", "testpassword")
 os.environ.setdefault("MINIO_SECRET_KEY", "testpassword")
 os.environ.setdefault("LITELLM_MASTER_KEY", "sk-local-test-key-16chars")
@@ -33,8 +36,10 @@ def event_loop_policy():
 def mock_librarian():
     """Mock LibrarianClient. Always spec to catch interface drift."""
     from master.agents.librarian import LibrarianClient  # noqa: F401 — future import
+
     client = AsyncMock()
     from master.agents.base.agent import ContextPackage
+
     client.get_context_package.return_value = ContextPackage(
         requesting_agent="test-agent",
         task_type="test",
@@ -53,6 +58,7 @@ def mock_llm_registry():
     registry = AsyncMock()
     provider = AsyncMock()
     from master.llm.interfaces import CompletionResponse, TokenUsage
+
     provider.provider_id = "test-provider"
     provider.complete.return_value = CompletionResponse(
         content="Test LLM response",
@@ -78,7 +84,7 @@ def mock_telemetry():
 def mock_redis():
     """Mock async Redis client."""
     redis = AsyncMock()
-    redis.exists.return_value = 0     # No revocations by default
+    redis.exists.return_value = 0  # No revocations by default
     redis.set.return_value = True
     redis.get.return_value = None
     redis.incrbyfloat.return_value = 0.0

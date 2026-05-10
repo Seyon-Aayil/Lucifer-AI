@@ -5,6 +5,7 @@ Domain-specific exception hierarchy for Lucifer AI.
 All application errors derive from LuciferError.
 HTTP translation happens at the router layer only — never here.
 """
+
 from __future__ import annotations
 
 
@@ -18,6 +19,7 @@ class LuciferError(Exception):
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
+
 
 class AuthError(LuciferError):
     """Base class for authentication / authorisation failures."""
@@ -45,6 +47,7 @@ class InsufficientPermissionsError(AuthError):
 
 # ── Privacy & Safety ─────────────────────────────────────────────────────────
 
+
 class PIIDetectedError(LuciferError):
     """
     PII detected in content destined for a cloud LLM.
@@ -65,6 +68,7 @@ class ContentPolicyViolationError(LuciferError):
 
 # ── Budget & Cost ─────────────────────────────────────────────────────────────
 
+
 class BudgetExceededError(LuciferError):
     """Agent or global daily spend cap reached."""
 
@@ -83,6 +87,7 @@ class TokenBudgetExceededError(LuciferError):
 
 
 # ── LLM & Providers ───────────────────────────────────────────────────────────
+
 
 class ProviderError(LuciferError):
     """Base class for LLM provider failures."""
@@ -110,6 +115,7 @@ class NoSuitableProviderError(LuciferError):
 
 # ── Agents ────────────────────────────────────────────────────────────────────
 
+
 class AgentError(LuciferError):
     """Base class for agent execution failures."""
 
@@ -118,7 +124,7 @@ class AgentTimeoutError(AgentError):
     """Agent execution exceeded its time limit."""
 
 
-class AgentEscalationRequired(AgentError):
+class AgentEscalationRequiredError(AgentError):
     """
     Risk tier requires human-in-the-loop approval.
     Not a real error — signals the orchestrator to insert a HitL checkpoint.
@@ -130,7 +136,12 @@ class AgentEscalationRequired(AgentError):
         self.reason = reason
 
 
+# Backward-compat alias
+AgentEscalationRequired = AgentEscalationRequiredError
+
+
 # ── Memory & Graph ────────────────────────────────────────────────────────────
+
 
 class LibrarianError(LuciferError):
     """Base class for Librarian Agent failures."""
@@ -147,15 +158,14 @@ class PermissionDeniedError(LibrarianError):
     """
 
     def __init__(self, agent_id: str, node_type: str, operation: str) -> None:
-        super().__init__(
-            f"Agent '{agent_id}' denied '{operation}' on '{node_type}' nodes"
-        )
+        super().__init__(f"Agent '{agent_id}' denied '{operation}' on '{node_type}' nodes")
         self.agent_id = agent_id
         self.node_type = node_type
         self.operation = operation
 
 
 # ── MCP ───────────────────────────────────────────────────────────────────────
+
 
 class MCPError(LuciferError):
     """Base class for MCP server communication failures."""
@@ -174,6 +184,7 @@ class MCPPermissionError(MCPError):
 
 
 # ── Sync ─────────────────────────────────────────────────────────────────────
+
 
 class SyncError(LuciferError):
     """Base class for edge↔master sync failures."""

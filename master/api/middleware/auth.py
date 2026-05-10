@@ -6,7 +6,10 @@ Validates Bearer tokens on every protected request, checks device revocation,
 and injects device_id into request.state for downstream use.
 Routes listed in EXEMPT_PATHS bypass auth (health, registration).
 """
+
 from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -50,9 +53,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)  # type: ignore[arg-type]
         self._revocation = revocation_store
 
-    async def dispatch(self, request: Request, call_next: object) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         if request.url.path in EXEMPT_PATHS:
-            return await call_next(request)  # type: ignore[operator]
+            return await call_next(request)
 
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
@@ -93,4 +98,4 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         request.state.device_id = device_id
         request.state.jti = jti
-        return await call_next(request)  # type: ignore[operator]
+        return await call_next(request)

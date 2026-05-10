@@ -5,6 +5,7 @@ OpenTelemetry SDK setup: traces, metrics, logs.
 Called once via setup_telemetry() at app startup.
 Provides get_tracer() for creating trace spans in application code.
 """
+
 from __future__ import annotations
 
 from opentelemetry import metrics, trace

@@ -5,21 +5,22 @@ Per-provider circuit breaker (half-open/open/closed state machine).
 Trips after N consecutive failures; auto-recovers after a cooldown window.
 Integrated into ProviderRegistry — failing providers are skipped in selection.
 """
+
 from __future__ import annotations
 
 import asyncio
+import enum
 import time
-from enum import Enum
 
 from master.core.logging import get_logger
 
 log = get_logger(__name__)
 
 
-class CircuitState(str, Enum):
-    CLOSED = "closed"       # Normal operation
-    OPEN = "open"           # Too many failures — reject immediately
-    HALF_OPEN = "half_open" # Cooldown elapsed — allow one probe request
+class CircuitState(enum.StrEnum):
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"  # Too many failures — reject immediately
+    HALF_OPEN = "half_open"  # Cooldown elapsed — allow one probe request
 
 
 class CircuitBreaker:

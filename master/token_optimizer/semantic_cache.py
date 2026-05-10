@@ -5,10 +5,11 @@ GPTCache wrapper backed by Redis with cosine-similarity threshold.
 Caches LLM completions keyed on prompt embeddings.
 Cache hits bypass the LLM entirely — zero token spend.
 """
+
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+from typing import Any, cast
 
 from master.core.config import get_settings
 from master.core.logging import get_logger
@@ -32,19 +33,20 @@ class SemanticCache:
 
     def _init_gptcache(self) -> None:
         try:
-            from gptcache import Cache  # type: ignore[import]
-            from gptcache.adapter.api import init_similar_cache  # type: ignore[import]
-            from gptcache.embedding import Onnx  # type: ignore[import]
-            from gptcache.manager import get_data_manager  # type: ignore[import]
+            from gptcache import Cache
+            from gptcache.adapter.api import init_similar_cache
+            from gptcache.embedding import Onnx
             from gptcache.similarity_evaluation.distance import (
-                SearchDistanceEvaluation,  # type: ignore[import]
+                SearchDistanceEvaluation,
             )
 
             self._gptcache = Cache()
             init_similar_cache(
                 cache_obj=self._gptcache,
                 embedding=Onnx(),
-                evaluation=SearchDistanceEvaluation(positive=True, max_distance=1 - self._threshold),
+                evaluation=SearchDistanceEvaluation(
+                    positive=True, max_distance=1 - self._threshold
+                ),
             )
             log.info("semantic_cache.initialized", threshold=self._threshold)
         except (ImportError, Exception) as exc:
@@ -72,13 +74,14 @@ class SemanticCache:
 
         # GPTCache is synchronous — offload in production
         import asyncio
+
         loop = asyncio.get_running_loop()
         try:
             if self._gptcache:
                 result = await loop.run_in_executor(None, self._gptcache.get, combined_prompt)
                 if result:
                     log.info("semantic_cache.hit", prompt_len=len(prompt))
-                    return result  # type: ignore[return-value]
+                    return cast(str, result)
         except Exception as exc:
             log.warning("semantic_cache.get_error", error=str(exc))
         return None
@@ -91,6 +94,7 @@ class SemanticCache:
         combined_prompt = self._combined_key(device_id, prompt)
 
         import asyncio
+
         loop = asyncio.get_running_loop()
         try:
             if self._gptcache:
@@ -106,8 +110,8 @@ class SemanticCache:
         combined_prompt = self._combined_key(device_id, prompt)
 
         import asyncio
+        import contextlib
+
         loop = asyncio.get_running_loop()
-        try:
+        with contextlib.suppress(Exception):
             await loop.run_in_executor(None, self._gptcache.delete, combined_prompt)
-        except Exception:
-            pass

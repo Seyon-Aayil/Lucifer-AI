@@ -5,6 +5,7 @@ Device and token revocation backed by Redis.
 Revoked device IDs propagate within the TTL of the Redis entry (default 60s
 cache + background refresh keeps this below the spec's 60s propagation window).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -51,7 +52,7 @@ class RevocationStore:
 
     async def is_device_revoked(self, device_id: str) -> bool:
         """Return True if the device has been revoked."""
-        return await self._redis.exists(_device_redis_key(device_id)) > 0
+        return bool(await self._redis.exists(_device_redis_key(device_id)))
 
     async def revoke_jti(self, jti: str, ttl_seconds: int | None = None) -> None:
         """
@@ -64,4 +65,4 @@ class RevocationStore:
 
     async def is_jti_revoked(self, jti: str) -> bool:
         """Return True if the specific token has been revoked."""
-        return await self._redis.exists(_jti_redis_key(jti)) > 0
+        return bool(await self._redis.exists(_jti_redis_key(jti)))

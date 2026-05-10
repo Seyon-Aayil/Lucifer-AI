@@ -5,18 +5,19 @@ BaseAgent abstract class and all shared agent data types.
 Every agent in the system inherits from BaseAgent and must satisfy
 the AgentResponse contract — never raising from execute().
 """
+
 from __future__ import annotations
 
+import enum
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
-from master.llm.interfaces import TokenUsage
+from master.llm.interfaces import TokenUsage as TokenUsage  # re-export
 
 log = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -24,21 +25,24 @@ tracer = get_tracer(__name__)
 
 # ── Enums ────────────────────────────────────────────────────────────────────
 
-class RiskTier(str, Enum):
+
+class RiskTier(enum.StrEnum):
     """
     Risk classification for agent tasks.
     LOW/MEDIUM: autonomous execution.
     HIGH: HitL checkpoint required.
     CRITICAL: always blocked; manual only.
     """
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
 
 
-class AgentSurface(str, Enum):
+class AgentSurface(enum.StrEnum):
     """The device surface that originated the request."""
+
     WATCH = "watch"
     MOBILE = "mobile"
     DESKTOP = "desktop"
@@ -49,6 +53,7 @@ class AgentSurface(str, Enum):
 
 # ── Memory Types ──────────────────────────────────────────────────────────────
 
+
 @dataclass
 class MemoryDelta:
     """
@@ -56,6 +61,7 @@ class MemoryDelta:
     Collected by the orchestrator and applied by LibrarianAgent.
     Never written directly by non-Librarian agents.
     """
+
     operation: Literal["upsert", "soft_delete", "edge_upsert", "edge_delete"]
     node_type: str | None = None
     node_id: str | None = None
@@ -69,6 +75,7 @@ class MemoryDelta:
 @dataclass
 class ArtifactRef:
     """Reference to a stored artifact (file in MinIO)."""
+
     artifact_id: str
     content_hash: str
     storage_path: str
@@ -78,9 +85,11 @@ class ArtifactRef:
 
 # ── Token Budget ──────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class TokenBudget:
     """Immutable budget constraints for a single agent turn."""
+
     input_limit: int
     output_limit: int
     max_cost_usd: float
@@ -90,12 +99,12 @@ class TokenBudget:
     def for_surface(cls, surface: AgentSurface) -> TokenBudget:
         """Return appropriate budget limits based on the calling surface."""
         budgets: dict[AgentSurface, tuple[int, int, float]] = {
-            AgentSurface.WATCH:   (512,   128,   0.001),
-            AgentSurface.MOBILE:  (2048,  512,   0.01),
-            AgentSurface.DESKTOP: (8192,  2048,  0.05),
-            AgentSurface.WEB:     (8192,  2048,  0.05),
-            AgentSurface.CLI:     (16384, 4096,  0.10),
-            AgentSurface.MASTER:  (131072, 8192, 1.00),
+            AgentSurface.WATCH: (512, 128, 0.001),
+            AgentSurface.MOBILE: (2048, 512, 0.01),
+            AgentSurface.DESKTOP: (8192, 2048, 0.05),
+            AgentSurface.WEB: (8192, 2048, 0.05),
+            AgentSurface.CLI: (16384, 4096, 0.10),
+            AgentSurface.MASTER: (131072, 8192, 1.00),
         }
         inp, out, cost = budgets[surface]
         return cls(input_limit=inp, output_limit=out, max_cost_usd=cost)
@@ -103,22 +112,25 @@ class TokenBudget:
 
 # ── Context Package ───────────────────────────────────────────────────────────
 
+
 @dataclass
 class ContextPackage:
     """
     Graph context assembled by LibrarianAgent for a requesting agent.
     Contains only nodes the requesting agent is permitted to see (ACL-filtered).
     """
+
     requesting_agent: str
     task_type: str
     nodes: list[dict[str, Any]] = field(default_factory=list)
     edges: list[dict[str, Any]] = field(default_factory=list)
-    summary: str = ""              # LLM-generated 200-token summary
+    summary: str = ""  # LLM-generated 200-token summary
     token_estimate: int = 0
     ttl_seconds: int = 300
 
 
 # ── Request / Response ────────────────────────────────────────────────────────
+
 
 @dataclass
 class AgentRequest:
@@ -126,6 +138,7 @@ class AgentRequest:
     Immutable request payload passed to every agent's execute() method.
     Created by the orchestrator; never constructed within agents.
     """
+
     task_id: str
     agent_id: str
     intent: str
@@ -168,6 +181,7 @@ class AgentResponse:
     Structured response from any agent's execute() method.
     Always returned — never raised. Use status='error' for failures.
     """
+
     task_id: str
     agent_id: str
     status: Literal["success", "partial", "escalate", "error"]
@@ -183,6 +197,7 @@ class AgentResponse:
 @dataclass
 class AgentStreamChunk:
     """Single streaming chunk from stream_execute()."""
+
     task_id: str
     agent_id: str
     delta: str
@@ -191,6 +206,7 @@ class AgentStreamChunk:
 
 
 # ── Base Agent ────────────────────────────────────────────────────────────────
+
 
 class BaseAgent(ABC):
     """
@@ -201,21 +217,25 @@ class BaseAgent(ABC):
       - Telemetry emission on every action
       - AgentResponse contract from execute()
 
-    Subclasses must implement execute().
+    Subclasses must implement execute() and define AGENT_ID as a class variable.
     Optionally override stream_execute() for streaming surfaces.
     """
+
+    AGENT_ID: ClassVar[str] = ""  # every subclass must override this
 
     def __init__(
         self,
         agent_id: str,
-        librarian: Any,              # LibrarianClient — typed loosely to avoid circular import
-        llm_registry: Any,           # ProviderRegistry
-        telemetry_emitter: Any,      # TelemetryEmitter
+        librarian: Any,  # LibrarianClient — typed loosely to avoid circular import
+        llm_registry: Any,  # ProviderRegistry
+        telemetry_emitter: Any,  # TelemetryEmitter
+        mcp_client: Any = None,  # MCPClient — injected by orchestrator from app-level registry
     ) -> None:
         self.agent_id = agent_id
         self._librarian = librarian
         self._llm = llm_registry
         self._telemetry = telemetry_emitter
+        self._mcp = mcp_client
 
     @abstractmethod
     async def execute(self, request: AgentRequest) -> AgentResponse:
@@ -227,9 +247,7 @@ class BaseAgent(ABC):
         - Populate memory_deltas for any knowledge graph writes
         """
 
-    async def stream_execute(
-        self, request: AgentRequest
-    ) -> AsyncIterator[AgentStreamChunk]:
+    async def stream_execute(self, request: AgentRequest) -> AsyncIterator[AgentStreamChunk]:
         """
         Streaming variant. Default: executes synchronously and wraps in a
         single chunk with is_final=True.

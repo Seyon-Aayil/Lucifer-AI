@@ -290,7 +290,7 @@ return AgentResponse(
 
 ## Phase Context
 
-**Current phase: Phase 2 complete → Phase 3 in progress.**
+**Current phase: Phase 3 complete → Phase 4 next.**
 
 ---
 
@@ -326,64 +326,108 @@ return AgentResponse(
 
 ---
 
-### Phase 3 — Full Agent Swarm + News Pipeline (🔄 Next)
+### Phase 3 — Full Agent Swarm + News Pipeline (✅ Complete)
 
 **DoD to exit Phase 3:** All 5 specialist agents operational; news digest pipeline running on schedule; Mem0/Zep memory fully wired; AsyncPostgresSaver replacing MemorySaver in LangGraph.
 
 Priority order:
 
-1. **Agent Pool Registry** (`master/orchestrator/agent_pool.py`)
-   - Dynamic `agent_id → BaseAgent` registry replacing the hardcoded `PersonalAgent` instantiation in `execute_node`
-   - Agents loaded via config; supports hot-reload
-   - Status: **Missing — must be built**
+1. **Agent Pool Registry** (`master/orchestrator/agent_pool.py`) ✅
+   - `AgentPool.build_default()` auto-registers all agents; silently skips modules not yet importable
+   - `AgentPool.resolve(agent_id, **deps)` instantiates the correct agent; falls back to `personal-agent`
+   - `AgentPool.reload()` for hot-reload without process restart
+   - `execute_node` now uses module-level `_agent_pool` singleton instead of hardcoded `PersonalAgent`
+   - `BaseAgent.AGENT_ID: ClassVar[str]` added to enforce the registry contract on all subclasses
+   - Status: **Done**
 
-2. **Remaining Specialist Agents**
-   - `master/agents/coding/agent.py` — Code review, PR analysis, GitHub tool calls
-   - `master/agents/financial/agent.py` — Spend tracking, budget alerts (HIGH risk → HitL always)
-   - `master/agents/health/agent.py` — HealthKit data queries (local-only; never cloud)
-   - `master/agents/research/agent.py` — Web search + Notion read + summarisation
-   - Status: **Missing — must be built**
+2. **Remaining Specialist Agents** ✅
+   - `master/agents/coding/agent.py` — PR review, repo summary, issue creation via GitHub MCP ✅
+   - `master/agents/financial/agent.py` — Spend tracking; write intents always escalate for HitL ✅
+   - `master/agents/health/agent.py` — Wellness queries; enforces Ollama-only (no cloud LLM) ✅
+   - `master/agents/research/agent.py` — Notion search + summarisation + GitHub repo context ✅
+   - Agent manifests created for financial and health agents ✅
+   - Status: **Done**
 
-3. **LibrarianAgent Full Wiring** (`master/agents/librarian/`)
-   - `mem0_client.py` — Real Mem0 API integration (episodic memory)
-   - `zep_client.py` — Real Zep/Graphiti API integration (temporal graph)
-   - `context_builder.py` — Assemble ACL-filtered ContextPackage from Mem0 + Zep + Neo4j
-   - `memory_writer.py` — Apply `MemoryDelta` list to all three stores
-   - `decay_scheduler.py` — APScheduler job for nightly decay pass
-   - Status: **Stubs in place — logic missing**
+3. **LibrarianAgent Full Wiring** (`master/agents/librarian/`) ✅
+   - `mem0_client.py` — `search()`, `add()`, `delete()` via Mem0 self-hosted REST API ✅
+   - `zep_client.py` — `search()`, `add_episode()`, `ensure_session()` via Zep v2 REST API ✅
+   - `context_builder.py` — parallel fan-out to Neo4j + Mem0 + Zep; ACL-filtered nodes; plain-text summary capped at 800 chars ✅
+   - `memory_writer.py` — routes deltas by classification (standard→all stores, restricted→Neo4j+Zep only, secret→never); concurrent writes with partial-failure logging ✅
+   - `decay_scheduler.py` — exponential decay (halves every ~7 days); soft-deletes below 0.05 threshold; `attach()` hooks into AsyncIOScheduler; wired into FastAPI lifespan ✅
+   - Status: **Done**
 
-4. **Orchestrator Real LibrarianClient** (`master/orchestrator/graph.py`)
-   - `context_inject_node`: replace placeholder `ContextPackage` with real `librarian.get_context_package(agent_id, intent)` call
-   - `memory_write_node`: replace direct GraphClient call with `librarian.apply_deltas(memory_deltas)` to write across all three stores
-   - Status: **Placeholder logic — must be replaced**
+4. **Orchestrator Real LibrarianClient** (`master/orchestrator/graph.py`) ✅
+   - `context_inject_node`: `ContextBuilder(GraphClient)` with graceful Neo4j fallback ✅
+   - `memory_write_node`: uses `MemoryWriter.apply_deltas()` — writes to Neo4j + Mem0 + Zep ✅
+   - Status: **Done**
 
-5. **AsyncPostgresSaver Checkpointer** (`master/orchestrator/graph.py`)
-   - Replace `MemorySaver()` with `AsyncPostgresSaver` for persistent multi-turn conversation state
-   - Requires `langgraph-checkpoint-postgres` dependency
-   - Status: **In-memory only — must be upgraded**
+5. **AsyncPostgresSaver Checkpointer** (`master/orchestrator/graph.py`) ✅
+   - `build_graph(checkpointer=None)` now accepts an optional checkpointer; defaults to `MemorySaver` (safe for tests/import-time)
+   - FastAPI lifespan creates `AsyncPostgresSaver.from_conn_string(database_url)`, calls `.setup()` (auto-creates checkpoint tables), rebuilds graph with it and stores on `app.state.graph`
+   - `chat.py` REST + WebSocket prefer `app.state.graph` (Postgres-backed), fall back to `_graph_fallback` (in-memory)
+   - `langgraph-checkpoint-postgres>=2.0.0` added to `pyproject.toml`
+   - Status: **Done**
 
-6. **News Sync Engine** (`master/news/`)
-   - Fetch → extract → score → cluster → digest pipeline
-   - Sources: RSS, HackerNews API, Reddit API
-   - Scheduled via APScheduler; writes `NewsItem` nodes to Neo4j
-   - Status: **Directory empty — must be built**
+6. **News Sync Engine** (`master/news/`) ✅
+   - `pipeline.py` — fetch (parallel) → score (recency 70% + content 30%) → deduplicate against Neo4j url_hashes → upsert `News` nodes
+   - `scheduler.py` — `NewsScheduler.create()` wires default sources (HN, arXiv CS.AI/CS.LG, GitHub Trending, r/programming, r/MachineLearning); `attach()` hooks into AsyncIOScheduler at configurable cadence
+   - Both wired into FastAPI lifespan; guarded by `settings.news_scheduler_enabled`
+   - Status: **Done**
 
 7. **Intent Classifier Upgrade** (`master/orchestrator/graph.py`)
-   - Replace `_simple_intent_classifier()` rule-based approach with a lightweight local model (e.g. `distilbert-base` zero-shot via Ollama)
-   - Status: **Rule-based stub — upgrade in Phase 3**
+   - `_ollama_intent_classifier()` calls Ollama `mistral` with structured JSON prompt; falls back to rule-based on timeout/error ✅
+   - Status: **Done**
 
-8. **Content Policy Middleware** (`master/api/middleware/content_policy.py`)
-   - Implement actual safety classification beyond the current stub
-   - Status: **Stub — must be implemented**
+8. **Content Policy Middleware** (`master/api/middleware/content_policy.py`) ✅
+   - Input checks: length guard (32k chars), hard blocklist (malware/CSAM/weapons), prompt-injection patterns (role overrides, token injection, instruction-ignore phrases)
+   - Output check: credential/secret leak detection (passwords, API keys, private keys)
+   - `validate_input()` + `validate_output()` wired into `chat.py` REST handler (both directions checked)
+   - `validate()` shim preserved for backward compatibility
+   - Status: **Done**
 
-9. **Token Optimizer — context_profiler.py / deduplicator.py stubs**
-   - These are already implemented inline in `pipeline.py` (BM25 scoring + SimHash dedup)
-   - The standalone class files are redundant stubs — they can be removed or given proper implementations if needed as standalone components
-   - Status: **Low priority cleanup**
+9. **Token Optimizer — context_profiler.py / deduplicator.py** ✅
+   - `types.py` — `ContextChunk`, `PreparedContext`, `estimate_tokens` extracted from `pipeline.py`
+   - `context_profiler.py` — `ContextProfiler.profile()` implements BM25 keyword-overlap scoring as a proper standalone class
+   - `deduplicator.py` — `SemanticDeduplicator.deduplicate()` implements SimHash near-duplicate removal (MD5 fallback) as a proper standalone class
+   - `pipeline.py` delegates stages 3 and 4 to these classes; imports types from `types.py`
+   - Status: **Done**
 
-10. **MCP Integration for Agents**
-    - `PersonalAgent._chat()` and intent handlers need to accept an `MCPClient` and invoke tools (e.g., calendar summary via `gcal.list_events`)
-    - Currently all MCP handler methods return Phase 3 stubs
-    - Status: **Wiring pending**
+10. **MCP Integration for Agents** ✅
+    - `BaseAgent` now accepts `mcp_client` parameter stored as `self._mcp`
+    - `PersonalAgent._summarise_calendar` and `_schedule_meeting` invoke `gcal` MCP tools with graceful fallback
+    - `execute_node` extracts `mcp_registry` from LangGraph config and passes a wired `MCPClient` to the agent
+    - `chat.py` REST and WebSocket handlers inject `app.state.mcp_registry` into graph config
+    - Status: **Done**
 
-Do not start Phase 4 work (Desktop Tauri app) until Phase 3 DoD is met.
+**Phase 3 DoD met:** All 5 specialist agents operational; news digest pipeline running on schedule; Mem0/Zep memory fully wired; AsyncPostgresSaver replacing MemorySaver in LangGraph.
+
+---
+
+### Phase 4a — Master Sync Infrastructure (✅ Complete)
+
+**DoD:** Edge client can open mTLS gRPC connection, push encrypted node/edge deltas with vector-clock, receive conflict-resolved updates, pull hot-subgraph, and push telemetry.
+
+1. **Proto stubs** (`master/sync/lucifer_sync_pb2*.py`) ✅ — generated from `infra/proto/lucifer_sync.proto`; `make proto` + `make proto-check` targets added
+2. **ConflictResolver** (`master/sync/conflict_resolver.py`) ✅ — vector-clock LWW with agent-priority tiebreak (Librarian > HealthAgent > FinancialAgent > others); pure/testable
+3. **HotSubgraphBuilder** (`master/sync/hot_subgraph.py`) ✅ — Neo4j Cypher + ACL filter (excludes secret/localOnly); ≤50 MB cap; SHA-256 manifest hash
+4. **TelemetrySink** (`master/sync/telemetry_sink.py`) ✅ — batch INSERT into existing `telemetry_events` hypertable via asyncpg
+5. **DeviceAuthInterceptor** (`master/sync/auth.py`) ✅ — gRPC async interceptor; JWT validate + RevocationStore check; contextvar for servicer
+6. **LuciferSyncServicer** (`master/sync/server.py`) ✅ — SyncStream (bidi), GetHotSubgraph (unary), PushTelemetry (fire-and-forget); conflict audit via HMAC chain
+7. **GRPCServer / start_grpc_server** (`master/sync/runtime.py`) ✅ — mTLS from Settings paths; insecure fallback for dev; clean stop(grace=5)
+8. **SyncDeltaWorker** (`master/sync/workers.py`) ✅ — NATS `sync.edge.>` consumer; fans out `memory.delta.>` for Librarian
+9. **FastAPI lifespan** (`master/api/main.py`) ✅ — gRPC server + sync worker started/stopped alongside all other services
+10. **Healthcheck** (`master/api/routers/health.py`) ✅ — `/health/ready` includes `grpc_sync` status
+11. **Config** (`master/core/config.py`) ✅ — `grpc_bind_addr`, TLS paths, `sync_max_subgraph_bytes`, `sync_max_offline_actions`
+12. **Makefile** ✅ — `proto-check` (CI freshness gate), `dev-certs` (localhost mTLS certs)
+13. **Unit tests** (`master/tests/unit/test_sync_conflict_resolver.py`) ✅ — vector-clock cases, agent priority, size cap, manifest hash
+
+**Phase 4a DoD met.** Phase 4b (Tauri 2.0 desktop client — macOS first) may now begin.
+
+### Phase 4b — Tauri 2.0 Desktop Client (⏳ Planned)
+- macOS first; Windows deferred
+- Rust core + React frontend; Ollama sidecar + MLX; sqlite-vec edge graph
+- gRPC client (`tonic`) with mTLS; offline queue replay; hotkey overlay; menu-bar
+
+### Phase 4c — Tauri Mobile Go/No-Go (⏳ Planned)
+- Evaluate Tauri 2.0 iOS/Android vs React Native + native SwiftUI/Compose
+- Decision gates entry to Phase 5

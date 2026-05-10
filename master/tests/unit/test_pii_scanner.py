@@ -4,6 +4,7 @@ master.tests.unit.test_pii_scanner
 Unit tests for the PII scanner — regex patterns and masked output.
 NER model is disabled (use_ner=False) to avoid runtime model download in CI.
 """
+
 from __future__ import annotations
 
 import pytest

@@ -6,6 +6,7 @@ Supports RSS/Atom feeds, Reddit JSON API, arXiv API, GitHub trending.
 Respects ETags and Last-Modified headers for conditional fetching.
 Rate-limited per domain to avoid blacklisting.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
-import feedparser  # type: ignore[import]
+import feedparser
 
 from master.core.logging import get_logger
 
@@ -33,6 +34,7 @@ _DEFAULT_RATE_LIMIT = 0.5
 @dataclass
 class RawArticle:
     """A single raw article fetched from a source."""
+
     url: str
     title: str
     body: str
@@ -49,8 +51,9 @@ class RawArticle:
 @dataclass
 class NewsSource:
     """Configuration for a single news source."""
+
     source_id: str
-    source_type: str        # "rss", "reddit", "arxiv", "github"
+    source_type: str  # "rss", "reddit", "arxiv", "github"
     url: str
     cadence_minutes: int = 60
     max_articles: int = 50
@@ -71,9 +74,7 @@ class NewsFetcher:
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None:
             self._session = aiohttp.ClientSession(
-                headers={
-                    "User-Agent": "LuciferAI/0.1 (news-sync; +https://github.com/lucifer-ai)"
-                },
+                headers={"User-Agent": "LuciferAI/0.1 (news-sync; +https://github.com/lucifer-ai)"},
                 timeout=aiohttp.ClientTimeout(total=30),
             )
         return self._session
@@ -89,7 +90,9 @@ class NewsFetcher:
 
     def _domain(self, url: str) -> str:
         from urllib.parse import urlparse
-        return urlparse(url).netloc.lstrip("www.")
+
+        netloc = urlparse(url).netloc
+        return netloc.removeprefix("www.")
 
     async def fetch_source(self, source: NewsSource) -> list[RawArticle]:
         """Dispatch to the appropriate fetcher based on source_type."""
@@ -138,6 +141,7 @@ class NewsFetcher:
             pub: datetime | None = None
             if hasattr(entry, "published_parsed") and entry.published_parsed:
                 import calendar
+
                 pub = datetime.fromtimestamp(calendar.timegm(entry.published_parsed), tz=UTC)
 
             articles.append(

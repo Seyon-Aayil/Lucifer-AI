@@ -5,13 +5,13 @@ Neo4j async client wrapper for the Librarian Agent.
 All graph reads and writes in agent code go through this client.
 Never import the neo4j driver directly outside this module.
 """
+
 from __future__ import annotations
 
+import re
 from typing import Any
 
-import re
-
-from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession
+from neo4j import AsyncDriver, AsyncGraphDatabase
 
 from master.agents.librarian.access_control import NodeType, RelationType
 from master.core.config import get_settings

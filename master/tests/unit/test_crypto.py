@@ -5,6 +5,7 @@ Unit tests for master.core.crypto — Argon2id key derivation, AES-256-GCM
 encrypt/decrypt, HMAC chain computation.
 No external services required.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -70,7 +71,7 @@ class TestAESGCM:
         key1, _ = derive_aes_key("key1")
         key2, _ = derive_aes_key("key2")
         ct = encrypt(b"secret", key1)
-        with pytest.raises(Exception):  # cryptography raises InvalidTag
+        with pytest.raises(Exception):  # noqa: B017  # cryptography raises InvalidTag
             decrypt(ct, key2)
 
     def test_encrypt_str_decrypt_str_roundtrip(self) -> None:

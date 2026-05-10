@@ -16,13 +16,14 @@ Usage:
     result = await client.invoke("gmail", "read_emails", {...})
     await registry.disconnect_all()
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import]
+import yaml
 
 from master.core.config import get_settings
 from master.core.logging import get_logger
@@ -57,7 +58,9 @@ class MCPServerRegistry:
     # ── Factory ───────────────────────────────────────────────────────────────
 
     @classmethod
-    def from_config(cls, audit_logger: AuditLogger, config_path: Path | None = None) -> MCPServerRegistry:
+    def from_config(
+        cls, audit_logger: AuditLogger, config_path: Path | None = None
+    ) -> MCPServerRegistry:
         """Load server configs from YAML and construct the registry."""
         path = config_path or _DEFAULT_CONFIG_PATH
         if not path.exists():
@@ -87,7 +90,9 @@ class MCPServerRegistry:
                 allowed_agents=cfg.get("allowed_agents", []),
                 env_vars=cfg.get("env_vars", {}),
             )
-            log.debug("mcp.registry.server_loaded", server_id=server_id, transport=cfg.get("transport"))
+            log.debug(
+                "mcp.registry.server_loaded", server_id=server_id, transport=cfg.get("transport")
+            )
 
         log.info("mcp.registry.loaded", count=len(configs))
         return cls(configs, audit_logger)
@@ -170,9 +175,8 @@ class MCPServerRegistry:
         if config.transport == TransportType.SSE:
             if not config.url:
                 raise ValueError(f"SSE transport requires 'url' for server '{config.server_id}'")
-            api_key = (
-                config.env_vars.get("MCP_API_KEY")
-                or getattr(settings, f"mcp_{config.server_id}_api_key", None)
+            api_key = config.env_vars.get("MCP_API_KEY") or getattr(
+                settings, f"mcp_{config.server_id}_api_key", None
             )
             return SSETransport(base_url=config.url, api_key=api_key)
 
@@ -180,6 +184,7 @@ class MCPServerRegistry:
             # Docker sandbox wraps stdio-style servers as well
             if config.docker_image:
                 from master.mcp.transport.docker import DockerTransport
+
                 return DockerTransport(
                     image=config.docker_image,
                     env_vars=self._resolve_env(config.env_vars),
@@ -188,7 +193,9 @@ class MCPServerRegistry:
                 f"STDIO transport without docker_image is not permitted for '{config.server_id}'"
             )
 
-        raise ValueError(f"Unsupported transport type '{config.transport}' for '{config.server_id}'")
+        raise ValueError(
+            f"Unsupported transport type '{config.transport}' for '{config.server_id}'"
+        )
 
     def _resolve_env(self, raw_env: dict[str, str]) -> dict[str, str]:
         """

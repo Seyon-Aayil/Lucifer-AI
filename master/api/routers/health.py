@@ -4,6 +4,7 @@ master.api.routers.health
 Health check endpoints. Reports status of all service dependencies.
 Used by: Docker Compose healthchecks, Kubernetes probes, Grafana.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -107,17 +108,24 @@ async def readiness(request: Request) -> dict[str, Any]:
     except AttributeError:
         nats_status = {"status": "not_initialised"}
 
+    # gRPC sync server status
+    grpc_status: dict[str, Any]
+    try:
+        grpc_server = request.app.state.grpc_server
+        grpc_status = {"status": "ok" if grpc_server.is_running() else "down"}
+    except AttributeError:
+        grpc_status = {"status": "not_initialised"}
+
     services = {
         "postgres": postgres_check,
         "neo4j": neo4j_check,
         "redis": redis_check,
         "litellm": litellm_check,
         "nats": nats_status,
+        "grpc_sync": grpc_status,
     }
 
-    overall = all(
-        isinstance(s, dict) and s.get("status") == "ok" for s in services.values()
-    )
+    overall = all(isinstance(s, dict) and s.get("status") == "ok" for s in services.values())
 
     return {
         "status": "ok" if overall else "degraded",

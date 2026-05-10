@@ -17,8 +17,11 @@ build/
 
 # Secrets
 infra/secrets/
+infra/certs/
 *.pem
 *.key
+*.crt
+*.csr
 
 # Tauri build artifacts
 desktop/src-tauri/target/

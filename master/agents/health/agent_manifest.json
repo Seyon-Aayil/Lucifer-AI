@@ -1,0 +1,5 @@
+{
+  "agent_id": "health-agent",
+  "description": "Health assistant — HealthKit queries, local-only, never cloud",
+  "allowed_tools": {}
+}

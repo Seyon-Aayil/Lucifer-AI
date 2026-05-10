@@ -5,6 +5,7 @@ Unit tests for MCP client: schema validation, permission enforcement,
 audit log stub, and tool-not-found handling.
 All external services mocked — no network or DB required.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
@@ -32,9 +33,7 @@ def _make_client(
             description="Read emails",
             input_schema={
                 "type": "object",
-                "properties": {
-                    "max_results": {"type": "integer"}
-                },
+                "properties": {"max_results": {"type": "integer"}},
                 "additionalProperties": False,
             },
         )
@@ -149,6 +148,7 @@ class TestMCPClientTransport:
         result = await client.invoke("gmail", "read_emails", {})
 
         assert result.success is False
+        assert result.error is not None
         assert "No transport registered for server 'gmail'" in result.error
         assert result.server_id == "gmail"
         assert result.tool_name == "read_emails"

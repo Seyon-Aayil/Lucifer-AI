@@ -5,6 +5,7 @@ TelemetryEmitter: thin wrapper around OTel SDK for agent-level events.
 Every agent uses this to emit structured telemetry without touching OTel directly.
 Counters, histograms, and spans are all emitted through this single interface.
 """
+
 from __future__ import annotations
 
 import time
@@ -101,7 +102,9 @@ class TelemetryEmitter:
         except Exception:
             pass  # Telemetry must not crash agent execution
 
-    def timed_context(self, event_type: str, agent_id: str, task_id: str, trace_id: str) -> TimedEvent:
+    def timed_context(
+        self, event_type: str, agent_id: str, task_id: str, trace_id: str
+    ) -> TimedEvent:
         """Context manager that auto-records latency on exit."""
         return TimedEvent(self, event_type, agent_id, task_id, trace_id)
 
