@@ -401,4 +401,33 @@ Priority order:
 
 **Phase 3 DoD met:** All 5 specialist agents operational; news digest pipeline running on schedule; Mem0/Zep memory fully wired; AsyncPostgresSaver replacing MemorySaver in LangGraph.
 
-Phase 4 work (Desktop Tauri app) may now begin.
+---
+
+### Phase 4a — Master Sync Infrastructure (✅ Complete)
+
+**DoD:** Edge client can open mTLS gRPC connection, push encrypted node/edge deltas with vector-clock, receive conflict-resolved updates, pull hot-subgraph, and push telemetry.
+
+1. **Proto stubs** (`master/sync/lucifer_sync_pb2*.py`) ✅ — generated from `infra/proto/lucifer_sync.proto`; `make proto` + `make proto-check` targets added
+2. **ConflictResolver** (`master/sync/conflict_resolver.py`) ✅ — vector-clock LWW with agent-priority tiebreak (Librarian > HealthAgent > FinancialAgent > others); pure/testable
+3. **HotSubgraphBuilder** (`master/sync/hot_subgraph.py`) ✅ — Neo4j Cypher + ACL filter (excludes secret/localOnly); ≤50 MB cap; SHA-256 manifest hash
+4. **TelemetrySink** (`master/sync/telemetry_sink.py`) ✅ — batch INSERT into existing `telemetry_events` hypertable via asyncpg
+5. **DeviceAuthInterceptor** (`master/sync/auth.py`) ✅ — gRPC async interceptor; JWT validate + RevocationStore check; contextvar for servicer
+6. **LuciferSyncServicer** (`master/sync/server.py`) ✅ — SyncStream (bidi), GetHotSubgraph (unary), PushTelemetry (fire-and-forget); conflict audit via HMAC chain
+7. **GRPCServer / start_grpc_server** (`master/sync/runtime.py`) ✅ — mTLS from Settings paths; insecure fallback for dev; clean stop(grace=5)
+8. **SyncDeltaWorker** (`master/sync/workers.py`) ✅ — NATS `sync.edge.>` consumer; fans out `memory.delta.>` for Librarian
+9. **FastAPI lifespan** (`master/api/main.py`) ✅ — gRPC server + sync worker started/stopped alongside all other services
+10. **Healthcheck** (`master/api/routers/health.py`) ✅ — `/health/ready` includes `grpc_sync` status
+11. **Config** (`master/core/config.py`) ✅ — `grpc_bind_addr`, TLS paths, `sync_max_subgraph_bytes`, `sync_max_offline_actions`
+12. **Makefile** ✅ — `proto-check` (CI freshness gate), `dev-certs` (localhost mTLS certs)
+13. **Unit tests** (`master/tests/unit/test_sync_conflict_resolver.py`) ✅ — vector-clock cases, agent priority, size cap, manifest hash
+
+**Phase 4a DoD met.** Phase 4b (Tauri 2.0 desktop client — macOS first) may now begin.
+
+### Phase 4b — Tauri 2.0 Desktop Client (⏳ Planned)
+- macOS first; Windows deferred
+- Rust core + React frontend; Ollama sidecar + MLX; sqlite-vec edge graph
+- gRPC client (`tonic`) with mTLS; offline queue replay; hotkey overlay; menu-bar
+
+### Phase 4c — Tauri Mobile Go/No-Go (⏳ Planned)
+- Evaluate Tauri 2.0 iOS/Android vs React Native + native SwiftUI/Compose
+- Decision gates entry to Phase 5

@@ -31,6 +31,8 @@ from master.mcp.audit import AuditLogger
 from master.mcp.registry import MCPServerRegistry
 from master.news.scheduler import NewsScheduler
 from master.orchestrator.graph import build_graph
+from master.sync.runtime import start_grpc_server
+from master.sync.workers import SyncDeltaWorker
 from master.token_optimizer.spend_tracker import SpendTracker
 
 log = get_logger(__name__)
@@ -118,10 +120,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await js.add_stream(name=stream_name, subjects=subjects)
     log.info("nats.streams_ready")
 
+    # ── gRPC Sync Server (Phase 4a) ──────────────────────────────────────────
+    revocation_store = RevocationStore(redis_client)
+    if settings.grpc_sync_enabled:
+        grpc_server = await start_grpc_server(
+            graph_client=graph_client,
+            db_pool=db_pool,
+            nats_js=js,
+            audit_logger=audit_logger,
+            revocation_store=revocation_store,
+            settings=settings,
+        )
+        app.state.grpc_server = grpc_server
+
+        sync_worker = SyncDeltaWorker(nats_js=js, audit_logger=audit_logger)
+        sync_worker.start()
+        app.state.sync_worker = sync_worker
+        log.info("grpc_sync.ready", addr=settings.grpc_bind_addr)
+
     yield  # ── Application is running ────────────────────────────────────────
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     log.info("lucifer.shutdown")
+    if hasattr(app.state, "sync_worker"):
+        await app.state.sync_worker.stop()
+    if hasattr(app.state, "grpc_server"):
+        await app.state.grpc_server.stop(grace=5)
     scheduler.shutdown(wait=False)
     if hasattr(app.state, "news_scheduler"):
         await app.state.news_scheduler.close()
