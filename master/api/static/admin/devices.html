@@ -34,6 +34,8 @@
       background: var(--primary); color: white; border: 0; border-radius: 8px;
       padding: 10px 16px; font: inherit; font-weight: 500; cursor: pointer;
     }
+    button.secondary { background: transparent; border: 1px solid var(--border);
+                       color: var(--text); }
     button:disabled { opacity: 0.4; cursor: not-allowed; }
     .code-display {
       font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
@@ -50,6 +52,15 @@
     .footer { text-align: center; color: var(--text-3); font-size: 11px; margin-top: 32px; }
     .row { display: flex; gap: 8px; align-items: center; }
     .row > input { flex: 1; }
+    .session-strip {
+      display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+      background: var(--surface-elev); border: 1px solid var(--border);
+      border-radius: 8px; font-size: 12px; color: var(--text-2);
+      margin-bottom: 16px;
+    }
+    .session-strip .who { color: var(--text); font-family: "JetBrains Mono", monospace; }
+    h2 { font-size: 13px; font-weight: 600; color: var(--text-2);
+         text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 16px; }
   </style>
 </head>
 <body>
@@ -59,31 +70,49 @@
       <h1>Lucifer · Pair a device</h1>
     </header>
 
-    <section class="card">
-      <h2 style="font-size:13px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:0.06em;margin:0 0 16px">
-        1 — Authenticate
-      </h2>
-      <label>Operator bearer token</label>
-      <input id="bearer" type="password" placeholder="paste app_secret_key from .env" />
-
-      <h2 style="font-size:13px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:0.06em;margin:24px 0 16px">
-        2 — Mint pairing code
-      </h2>
-      <label>Optional hint shown to operator</label>
-      <div class="row">
-        <input id="hint" placeholder="e.g. macbook-pro" />
-        <button id="mint-btn">Mint</button>
+    <!-- ── LOGIN ─────────────────────────────────────────────────────────── -->
+    <section id="login-card" class="card">
+      <h2>Operator login</h2>
+      <label>Username</label>
+      <input id="username" autocomplete="username" />
+      <label>Password</label>
+      <input id="password" type="password" autocomplete="current-password" />
+      <div style="margin-top:16px;display:flex;gap:8px;align-items:center">
+        <button id="login-btn">Sign in</button>
+        <span id="login-error" class="error"></span>
       </div>
-      <div id="error" class="error"></div>
+      <p class="footer" style="margin-top:24px">
+        Set <span style="font-family:monospace">LUCIFER_OPERATOR_USERNAME</span>
+        and <span style="font-family:monospace">LUCIFER_OPERATOR_PASSWORD_HASH</span>
+        on the master to enable login. In dev, paste your
+        <span style="font-family:monospace">app_secret_key</span> as the password
+        with username <span style="font-family:monospace">dev</span>.
+      </p>
     </section>
 
-    <section id="code-card" class="card" style="display:none">
-      <h2 style="font-size:13px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:0.06em;margin:0 0 8px">
-        3 — Show on the device
-      </h2>
-      <div class="code-display" id="code-display">000000</div>
-      <div class="countdown" id="countdown">expires in 60s</div>
-    </section>
+    <!-- ── MAIN UI (hidden until logged in) ─────────────────────────────── -->
+    <div id="main-ui" style="display:none">
+      <div class="session-strip">
+        signed in as <span class="who" id="who"></span>
+        <span style="margin-left:auto;cursor:pointer;color:var(--text-3)" id="logout">log out</span>
+      </div>
+
+      <section class="card">
+        <h2>Mint pairing code</h2>
+        <label>Optional hint shown to operator</label>
+        <div class="row">
+          <input id="hint" placeholder="e.g. macbook-pro" />
+          <button id="mint-btn">Mint</button>
+        </div>
+        <div id="error" class="error"></div>
+      </section>
+
+      <section id="code-card" class="card" style="display:none">
+        <h2>Show on the device</h2>
+        <div class="code-display" id="code-display">000000</div>
+        <div class="countdown" id="countdown">expires in 60s</div>
+      </section>
+    </div>
 
     <p class="footer">
       Type the code into Lucifer's <strong>Pair this device</strong> screen
@@ -93,24 +122,85 @@
 
   <script>
     const $ = (id) => document.getElementById(id);
+    const TOKEN_KEY = "lucifer-operator-session";
     let countdownTimer = null;
 
+    function authHeader() {
+      const token = sessionStorage.getItem(TOKEN_KEY);
+      return token ? `Bearer ${token}` : "";
+    }
+
+    async function attemptLogin() {
+      const username = $("username").value.trim();
+      const password = $("password").value;
+      $("login-error").textContent = "";
+      if (!username || !password) {
+        $("login-error").textContent = "username and password required";
+        return;
+      }
+      $("login-btn").disabled = true;
+      try {
+        const res = await fetch("/admin/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        });
+        if (!res.ok) {
+          if (res.status === 501) {
+            // Login not configured; in dev we accept the shared bearer
+            // password as the operator's argon2 fallback. The username
+            // returned from /admin/whoami will be `shared-bearer`.
+            sessionStorage.setItem(TOKEN_KEY, password);
+            await afterLogin();
+            return;
+          }
+          const detail = await res.text();
+          throw new Error(`${res.status}: ${detail}`);
+        }
+        const body = await res.json();
+        sessionStorage.setItem(TOKEN_KEY, body.session_token);
+        await afterLogin();
+      } catch (e) {
+        $("login-error").textContent = String(e);
+      } finally {
+        $("login-btn").disabled = false;
+      }
+    }
+
+    async function afterLogin() {
+      try {
+        const res = await fetch("/admin/whoami", {
+          headers: { authorization: authHeader() },
+        });
+        if (!res.ok) throw new Error(`whoami ${res.status}`);
+        const who = await res.json();
+        $("who").textContent = who.username || "operator";
+      } catch (e) {
+        $("login-error").textContent = String(e);
+        sessionStorage.removeItem(TOKEN_KEY);
+        return;
+      }
+      $("login-card").style.display = "none";
+      $("main-ui").style.display = "block";
+    }
+
     async function mint() {
-      const bearer = $("bearer").value.trim();
       const hint = $("hint").value.trim() || null;
       $("error").textContent = "";
-      if (!bearer) { $("error").textContent = "bearer token required"; return; }
-
       $("mint-btn").disabled = true;
       try {
         const res = await fetch("/devices/admin/code", {
           method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "authorization": `Bearer ${bearer}`,
-          },
+          headers: { "content-type": "application/json", "authorization": authHeader() },
           body: JSON.stringify({ issued_for: hint }),
         });
+        if (res.status === 401 || res.status === 403) {
+          sessionStorage.removeItem(TOKEN_KEY);
+          $("main-ui").style.display = "none";
+          $("login-card").style.display = "block";
+          $("login-error").textContent = "session expired — sign in again";
+          return;
+        }
         if (!res.ok) {
           const detail = await res.text();
           throw new Error(`${res.status}: ${detail}`);
@@ -122,6 +212,12 @@
       } finally {
         $("mint-btn").disabled = false;
       }
+    }
+
+    function logout() {
+      sessionStorage.removeItem(TOKEN_KEY);
+      $("main-ui").style.display = "none";
+      $("login-card").style.display = "block";
     }
 
     function showCode(code, ttl) {
@@ -143,7 +239,17 @@
       countdownTimer = setInterval(tick, 250);
     }
 
+    $("login-btn").addEventListener("click", attemptLogin);
+    $("password").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") attemptLogin();
+    });
     $("mint-btn").addEventListener("click", mint);
+    $("logout").addEventListener("click", logout);
+
+    // Resume an existing session if one is in storage.
+    if (sessionStorage.getItem(TOKEN_KEY)) {
+      afterLogin();
+    }
   </script>
 </body>
 </html>

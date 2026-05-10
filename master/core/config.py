@@ -129,6 +129,16 @@ class Settings(BaseSettings):
     pairing_cert_validity_days: int = 365
     pairing_rate_limit_per_window: int = 5
     pairing_rate_limit_window_seconds: int = 60
+
+    # ── Operator login ─────────────────────────────────────────────────────
+    # Single-operator self-hosted setup: username + argon2-hashed password
+    # supplied via env (LUCIFER_OPERATOR_USERNAME, LUCIFER_OPERATOR_PASSWORD_HASH).
+    # When operator_username is empty the admin endpoints fall back to the
+    # legacy shared-bearer check (only accepted in development).
+    operator_username: str = ""
+    operator_password_hash: str = ""
+    operator_session_ttl_seconds: int = 8 * 3600
+
     grpc_sync_enabled: bool = True
     sync_max_subgraph_bytes: int = 50 * 1024 * 1024  # 50 MiB
     sync_max_offline_actions: int = 10_000

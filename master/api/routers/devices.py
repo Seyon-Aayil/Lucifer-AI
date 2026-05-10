@@ -36,9 +36,16 @@ from redis.asyncio import Redis
 from master.core.auth.cert_mint import mint_client_credentials
 from master.core.auth.device_pairing import PairingCodeStore
 from master.core.auth.jwt import create_access_token, create_refresh_token
+from master.core.auth.operator import (
+    InvalidCredentialsError,
+    is_operator_login_configured,
+    login as operator_login,
+    validate_operator_session,
+)
 from master.core.auth.rate_limit import FixedWindowRateLimiter
 from master.core.auth.revocation import RevocationStore
 from master.core.config import get_settings
+from master.core.exceptions import InvalidTokenError, TokenExpiredError
 from master.core.logging import get_logger
 
 log = get_logger(__name__)
@@ -47,6 +54,22 @@ router = APIRouter()
 
 
 # ── DTOs ─────────────────────────────────────────────────────────────────────
+
+
+class OperatorLoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=128)
+    password: str = Field(..., min_length=1, max_length=512)
+
+
+class OperatorLoginResponse(BaseModel):
+    session_token: str
+    ttl_seconds: int
+
+
+class OperatorWhoamiResponse(BaseModel):
+    username: str
+    type: str
+    expires_at: int | None
 
 
 class MintCodeRequest(BaseModel):
@@ -177,10 +200,20 @@ def _client_ip(request: Request) -> str:
     return "unknown"
 
 
-def _require_admin(authorization: Annotated[str | None, Header()] = None) -> None:
+def _require_admin(authorization: Annotated[str | None, Header()] = None) -> dict:
     """
-    Minimal operator gate: shared bearer matching `settings.app_secret_key`
-    is accepted. Production should replace this with SSO / operator login.
+    Operator gate. Order of preference:
+
+    1. **Operator session** (`type=operator_session` JWT) issued by
+       `/admin/login`. This is the production path.
+    2. **Legacy shared bearer** matching `settings.app_secret_key` — only
+       accepted in development environments. Allows local devs to run
+       `curl -H "Authorization: Bearer $APP_SECRET_KEY"` without provisioning
+       an operator account.
+
+    Returns the decoded operator JWT payload (or a synthetic one for the
+    legacy path) so handlers can attribute audit logs to a specific
+    operator.
     """
     settings = get_settings()
     if not authorization or not authorization.startswith("Bearer "):
@@ -189,14 +222,73 @@ def _require_admin(authorization: Annotated[str | None, Header()] = None) -> Non
             detail="admin bearer token required",
         )
     presented = authorization.removeprefix("Bearer ").strip()
-    if not secrets.compare_digest(presented, settings.app_secret_key):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="invalid admin bearer token",
-        )
+
+    # 1. Operator session JWT
+    if is_operator_login_configured():
+        try:
+            return validate_operator_session(presented)
+        except TokenExpiredError as exc:
+            raise HTTPException(status_code=401, detail="operator session expired") from exc
+        except InvalidTokenError:
+            # Fall through to the dev-only shared-bearer path.
+            pass
+
+    # 2. Legacy shared bearer — only allowed when the master is in dev mode
+    if settings.is_development and secrets.compare_digest(presented, settings.app_secret_key):
+        return {"sub": "shared-bearer", "type": "legacy"}
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="invalid admin bearer token",
+    )
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/admin/login",
+    response_model=OperatorLoginResponse,
+    summary="Exchange operator username + password for a session token.",
+)
+async def admin_login(body: OperatorLoginRequest) -> OperatorLoginResponse:
+    if not is_operator_login_configured():
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=(
+                "operator login is not configured; set LUCIFER_OPERATOR_USERNAME "
+                "and LUCIFER_OPERATOR_PASSWORD_HASH on the master"
+            ),
+        )
+    try:
+        token = operator_login(body.username, body.password)
+    except InvalidCredentialsError as exc:
+        log.warning("operator.login.failed", username=body.username)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid credentials",
+        ) from exc
+    settings = get_settings()
+    log.info("operator.login.success", username=body.username)
+    return OperatorLoginResponse(
+        session_token=token,
+        ttl_seconds=settings.operator_session_ttl_seconds,
+    )
+
+
+@router.get(
+    "/admin/whoami",
+    response_model=OperatorWhoamiResponse,
+    summary="Inspect the current operator session.",
+)
+async def admin_whoami(
+    payload: Annotated[dict, Depends(_require_admin)],
+) -> OperatorWhoamiResponse:
+    return OperatorWhoamiResponse(
+        username=str(payload.get("sub", "")),
+        type=str(payload.get("type", "")),
+        expires_at=payload.get("exp") if isinstance(payload.get("exp"), int) else None,
+    )
 
 
 @router.post(
