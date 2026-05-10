@@ -1,0 +1,24 @@
+[package]
+name = "lucifer-ollama-sidecar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Manages a local Ollama subprocess and exposes a typed HTTP client for the Lucifer edge clients."
+
+[dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "time", "io-util", "sync"] }
+tokio-stream = { workspace = true, features = ["io-util"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures = { workspace = true }
+async-stream = "0.3"
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }

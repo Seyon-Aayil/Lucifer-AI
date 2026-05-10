@@ -29,11 +29,18 @@ edge/
 │       ├── store.rs       # EdgeStore: open, apply_manifest, vector_search
 │       ├── manifest.rs    # JSON-friendly hot-subgraph DTOs
 │       └── error.rs       # typed errors
-└── offline-queue/         # SQLite WAL-backed action queue + replay
+├── offline-queue/         # SQLite WAL-backed action queue + replay
+│   └── src/
+│       ├── lib.rs         # public API: OfflineQueue, QueuedAction, MAX_ACTIONS
+│       ├── queue.rs       # enqueue / claim_batch / mark_completed / mark_failed
+│       ├── types.rs       # ActionStatus + DTO
+│       └── error.rs       # typed errors
+└── ollama-sidecar/        # Local Ollama subprocess + HTTP client
     └── src/
-        ├── lib.rs         # public API: OfflineQueue, QueuedAction, MAX_ACTIONS
-        ├── queue.rs       # enqueue / claim_batch / mark_completed / mark_failed
-        ├── types.rs       # ActionStatus + DTO
+        ├── lib.rs         # public API: OllamaProcess, OllamaClient
+        ├── process.rs     # spawn / wait_ready / shutdown (kill_on_drop)
+        ├── client.rs      # list / pull / generate / chat (streaming)
+        ├── types.rs       # ChatMessage / GenerateChunk / ModelInfo
         └── error.rs       # typed errors
 ```
 

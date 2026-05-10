@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["sync-client", "desktop-bindings", "edge-store", "offline-queue"]
+members = ["sync-client", "desktop-bindings", "edge-store", "offline-queue", "ollama-sidecar"]
 
 [workspace.package]
 version = "0.1.0"
@@ -30,6 +30,8 @@ rusqlite = { version = "0.32", features = ["bundled", "blob", "load_extension"] 
 sqlite-vec = "0.1"
 zerocopy = { version = "0.7", features = ["derive"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+bytes = "1"
 
 [profile.release]
 lto = "thin"
