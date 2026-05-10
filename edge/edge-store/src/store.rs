@@ -3,6 +3,7 @@ use std::{path::Path, sync::Once};
 use rusqlite::{ffi::sqlite3_auto_extension, params, Connection};
 
 use crate::{
+    conversations::{self, Conversation, Message},
     error::{Error, Result},
     manifest::{EdgeDelta, NodeDelta, SubgraphManifest},
     EMBEDDING_DIM,
@@ -70,6 +71,7 @@ impl EdgeStore {
 
     fn init(conn: Connection) -> Result<Self> {
         conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(conversations::SCHEMA)?;
         // The vec virtual table sits alongside `nodes` and is keyed by `rowid`.
         let create_vec = format!(
             "CREATE VIRTUAL TABLE IF NOT EXISTS vec_nodes USING vec0(embedding float[{EMBEDDING_DIM}])"
@@ -256,6 +258,137 @@ impl EdgeStore {
             }
         }
         Ok(out)
+    }
+
+    // ── Conversations ───────────────────────────────────────────────────────
+
+    /// Create a new conversation. Returns the row's id.
+    pub fn create_conversation(&self, id: &str, title: &str, now_ms: i64) -> Result<()> {
+        if id.is_empty() {
+            return Err(Error::Invalid("conversation id is empty".into()));
+        }
+        self.conn.execute(
+            "INSERT INTO conversations (id, title, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?3)",
+            params![id, title, now_ms],
+        )?;
+        Ok(())
+    }
+
+    pub fn rename_conversation(&self, id: &str, title: &str, now_ms: i64) -> Result<()> {
+        let n = self.conn.execute(
+            "UPDATE conversations SET title = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, title, now_ms],
+        )?;
+        if n == 0 {
+            return Err(Error::Invalid(format!("unknown conversation_id {id}")));
+        }
+        Ok(())
+    }
+
+    pub fn delete_conversation(&self, id: &str) -> Result<()> {
+        let n = self
+            .conn
+            .execute("DELETE FROM conversations WHERE id = ?1", params![id])?;
+        if n == 0 {
+            return Err(Error::Invalid(format!("unknown conversation_id {id}")));
+        }
+        Ok(())
+    }
+
+    pub fn list_conversations(&self, limit: usize) -> Result<Vec<Conversation>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id, c.title, c.created_at, c.updated_at,
+                    (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS n
+             FROM conversations c
+             ORDER BY c.updated_at DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |r| {
+            Ok(Conversation {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                created_at: r.get(2)?,
+                updated_at: r.get(3)?,
+                message_count: r.get::<_, i64>(4)? as usize,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    /// Append a message to an existing conversation. Bumps the parent
+    /// conversation's `updated_at` so list ordering follows recency.
+    pub fn append_message(&self, msg: &Message) -> Result<()> {
+        if msg.conversation_id.is_empty() || msg.id.is_empty() {
+            return Err(Error::Invalid(
+                "message id / conversation_id required".into(),
+            ));
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        let exists: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM conversations WHERE id = ?1",
+            [&msg.conversation_id],
+            |r| r.get(0),
+        )?;
+        if exists == 0 {
+            return Err(Error::Invalid(format!(
+                "unknown conversation_id {}",
+                msg.conversation_id
+            )));
+        }
+        tx.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, agent_id, model,
+                                    tokens, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                msg.id,
+                msg.conversation_id,
+                msg.role,
+                msg.content,
+                msg.agent_id,
+                msg.model,
+                msg.tokens.map(i64::from),
+                msg.created_at,
+            ],
+        )?;
+        tx.execute(
+            "UPDATE conversations SET updated_at = ?2 WHERE id = ?1",
+            params![msg.conversation_id, msg.created_at],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn list_messages(&self, conversation_id: &str, limit: usize) -> Result<Vec<Message>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, conversation_id, role, content, agent_id, model, tokens, created_at
+             FROM messages
+             WHERE conversation_id = ?1
+             ORDER BY created_at ASC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![conversation_id, limit as i64], |r| {
+            Ok(Message {
+                id: r.get(0)?,
+                conversation_id: r.get(1)?,
+                role: r.get(2)?,
+                content: r.get(3)?,
+                agent_id: r.get(4)?,
+                model: r.get(5)?,
+                tokens: r.get::<_, Option<i64>>(6)?.map(|v| v as u32),
+                created_at: r.get(7)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    pub fn count_conversations(&self) -> Result<usize> {
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))?;
+        Ok(n as usize)
     }
 
     pub fn last_sync_at(&self) -> Result<Option<i64>> {
@@ -536,6 +669,99 @@ mod tests {
         let results = s.vector_search(&close, 2).unwrap();
         assert_eq!(results[0].0, "close");
         assert!(results[0].1 < results[1].1);
+    }
+
+    fn msg(id: &str, conv: &str, role: &str, content: &str, ts: i64) -> Message {
+        Message {
+            id: id.into(),
+            conversation_id: conv.into(),
+            role: role.into(),
+            content: content.into(),
+            agent_id: Some("personal-agent".into()),
+            model: Some("llama3.2".into()),
+            tokens: Some(42),
+            created_at: ts,
+        }
+    }
+
+    #[test]
+    fn create_and_list_conversations() {
+        let s = EdgeStore::open_in_memory().unwrap();
+        s.create_conversation("c1", "First", 100).unwrap();
+        s.create_conversation("c2", "Second", 200).unwrap();
+        let convs = s.list_conversations(10).unwrap();
+        assert_eq!(convs.len(), 2);
+        assert_eq!(convs[0].id, "c2"); // updated_at DESC
+        assert_eq!(convs[0].message_count, 0);
+    }
+
+    #[test]
+    fn create_conversation_rejects_empty_id() {
+        let s = EdgeStore::open_in_memory().unwrap();
+        assert!(matches!(
+            s.create_conversation("", "x", 0).unwrap_err(),
+            Error::Invalid(_)
+        ));
+    }
+
+    #[test]
+    fn append_message_bumps_conversation_updated_at() {
+        let s = EdgeStore::open_in_memory().unwrap();
+        s.create_conversation("c1", "T", 100).unwrap();
+        s.append_message(&msg("m1", "c1", "user", "hi", 200))
+            .unwrap();
+        let convs = s.list_conversations(10).unwrap();
+        assert_eq!(convs[0].updated_at, 200);
+        assert_eq!(convs[0].message_count, 1);
+    }
+
+    #[test]
+    fn append_message_unknown_conversation_errors() {
+        let s = EdgeStore::open_in_memory().unwrap();
+        let err = s
+            .append_message(&msg("m1", "ghost", "user", "hi", 0))
+            .unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
+    }
+
+    #[test]
+    fn list_messages_orders_by_created_at_asc() {
+        let s = EdgeStore::open_in_memory().unwrap();
+        s.create_conversation("c1", "T", 100).unwrap();
+        s.append_message(&msg("m1", "c1", "user", "first", 100))
+            .unwrap();
+        s.append_message(&msg("m2", "c1", "assistant", "reply", 200))
+            .unwrap();
+        s.append_message(&msg("m3", "c1", "user", "thanks", 300))
+            .unwrap();
+        let msgs = s.list_messages("c1", 10).unwrap();
+        assert_eq!(
+            msgs.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["m1", "m2", "m3"]
+        );
+        assert_eq!(msgs[1].role, "assistant");
+        assert_eq!(msgs[1].tokens, Some(42));
+    }
+
+    #[test]
+    fn delete_conversation_cascades_messages() {
+        let s = EdgeStore::open_in_memory().unwrap();
+        s.create_conversation("c1", "T", 100).unwrap();
+        s.append_message(&msg("m1", "c1", "user", "x", 100))
+            .unwrap();
+        s.delete_conversation("c1").unwrap();
+        assert_eq!(s.count_conversations().unwrap(), 0);
+        assert_eq!(s.list_messages("c1", 10).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn rename_conversation() {
+        let s = EdgeStore::open_in_memory().unwrap();
+        s.create_conversation("c1", "Old", 100).unwrap();
+        s.rename_conversation("c1", "New title", 200).unwrap();
+        let convs = s.list_conversations(10).unwrap();
+        assert_eq!(convs[0].title, "New title");
+        assert_eq!(convs[0].updated_at, 200);
     }
 
     #[test]

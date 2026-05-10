@@ -19,9 +19,12 @@
 //! Operations live in [`EdgeStore`]: open / apply_manifest / upsert /
 //! soft_delete / query_by_type / vector_search.
 
+pub mod conversations;
 pub mod error;
 pub mod manifest;
 pub mod store;
+
+pub use conversations::{Conversation, Message};
 
 pub use error::{Error, Result};
 pub use manifest::{EdgeDelta, NodeDelta, SubgraphManifest};

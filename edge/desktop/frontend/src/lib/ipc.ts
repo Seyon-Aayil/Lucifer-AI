@@ -66,6 +66,10 @@ function mockResponse<T>(cmd: string): T {
       return [] as unknown as T;
     case "list_nodes_by_type":
       return [] as unknown as T;
+    case "list_conversations":
+      return [] as unknown as T;
+    case "list_messages":
+      return [] as unknown as T;
     case "local_backend":
       return "ollama" as unknown as T;
     default:
@@ -109,6 +113,17 @@ export const ipc = {
 
   listNodesByType: (nodeType: string, limit: number) =>
     invoke<EdgeNode[]>("list_nodes_by_type", { nodeType, limit }),
+
+  listConversations: (limit: number) =>
+    invoke<StoredConversation[]>("list_conversations", { limit }),
+  createConversation: (id: string, title: string) =>
+    invoke<void>("create_conversation", { id, title }),
+  appendMessage: (message: StoredMessage) =>
+    invoke<void>("append_message", { message }),
+  listMessages: (conversationId: string, limit: number) =>
+    invoke<StoredMessage[]>("list_messages", { conversationId, limit }),
+  deleteConversation: (id: string) =>
+    invoke<void>("delete_conversation", { id }),
 
   persistPairingBundle: (bundle: PairingBundle) =>
     invoke<PersistedCredentials>("persist_pairing_bundle", { bundle }),
@@ -184,6 +199,25 @@ export type PersistedCredentials = {
   client_key_path: string;
   ca_cert_path: string;
   jwt_in_keychain: boolean;
+};
+
+export type StoredConversation = {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  message_count: number;
+};
+
+export type StoredMessage = {
+  id: string;
+  conversation_id: string;
+  role: "user" | "assistant" | "system" | "tool";
+  content: string;
+  agent_id?: string | null;
+  model?: string | null;
+  tokens?: number | null;
+  created_at: number;
 };
 
 export type EdgeNode = {

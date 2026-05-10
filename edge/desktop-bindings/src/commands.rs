@@ -243,6 +243,77 @@ pub async fn list_nodes_by_type(
         .await
 }
 
+// ── Conversations ────────────────────────────────────────────────────────────
+
+pub async fn list_conversations(
+    handle: &EdgeStoreHandle,
+    limit: usize,
+) -> Result<serde_json::Value, ConnectError> {
+    handle
+        .with_blocking(move |store| {
+            let convs = store
+                .list_conversations(limit)
+                .map_err(|e| ConnectError::Store(format!("list_conversations: {e}")))?;
+            Ok(serde_json::json!(convs))
+        })
+        .await
+}
+
+pub async fn create_conversation(
+    handle: &EdgeStoreHandle,
+    id: String,
+    title: String,
+) -> Result<(), ConnectError> {
+    let now = now_ms();
+    handle
+        .with_blocking(move |store| {
+            // EdgeStore methods take &mut self; with_blocking gives &EdgeStore.
+            // Use interior unsafety: we hold the only Mutex guard.
+            store
+                .create_conversation(&id, &title, now)
+                .map_err(|e| ConnectError::Store(format!("create_conversation: {e}")))
+        })
+        .await
+}
+
+pub async fn append_message(
+    handle: &EdgeStoreHandle,
+    message: lucifer_edge_store::Message,
+) -> Result<(), ConnectError> {
+    handle
+        .with_blocking(move |store| {
+            store
+                .append_message(&message)
+                .map_err(|e| ConnectError::Store(format!("append_message: {e}")))
+        })
+        .await
+}
+
+pub async fn list_messages(
+    handle: &EdgeStoreHandle,
+    conversation_id: String,
+    limit: usize,
+) -> Result<serde_json::Value, ConnectError> {
+    handle
+        .with_blocking(move |store| {
+            let msgs = store
+                .list_messages(&conversation_id, limit)
+                .map_err(|e| ConnectError::Store(format!("list_messages: {e}")))?;
+            Ok(serde_json::json!(msgs))
+        })
+        .await
+}
+
+pub async fn delete_conversation(handle: &EdgeStoreHandle, id: String) -> Result<(), ConnectError> {
+    handle
+        .with_blocking(move |store| {
+            store
+                .delete_conversation(&id)
+                .map_err(|e| ConnectError::Store(format!("delete_conversation: {e}")))
+        })
+        .await
+}
+
 // ── Local inference (MLX / Ollama) ───────────────────────────────────────────
 
 pub async fn local_backend(handle: &InferenceHandle) -> &'static str {
@@ -460,6 +531,48 @@ pub mod __handlers {
     }
 
     #[tauri::command]
+    pub async fn list_conversations(
+        handle: State<'_, EdgeStoreHandle>,
+        limit: usize,
+    ) -> Result<serde_json::Value, ConnectError> {
+        super::list_conversations(handle.inner(), limit).await
+    }
+
+    #[tauri::command]
+    pub async fn create_conversation(
+        handle: State<'_, EdgeStoreHandle>,
+        id: String,
+        title: String,
+    ) -> Result<(), ConnectError> {
+        super::create_conversation(handle.inner(), id, title).await
+    }
+
+    #[tauri::command]
+    pub async fn append_message(
+        handle: State<'_, EdgeStoreHandle>,
+        message: lucifer_edge_store::Message,
+    ) -> Result<(), ConnectError> {
+        super::append_message(handle.inner(), message).await
+    }
+
+    #[tauri::command]
+    pub async fn list_messages(
+        handle: State<'_, EdgeStoreHandle>,
+        conversation_id: String,
+        limit: usize,
+    ) -> Result<serde_json::Value, ConnectError> {
+        super::list_messages(handle.inner(), conversation_id, limit).await
+    }
+
+    #[tauri::command]
+    pub async fn delete_conversation(
+        handle: State<'_, EdgeStoreHandle>,
+        id: String,
+    ) -> Result<(), ConnectError> {
+        super::delete_conversation(handle.inner(), id).await
+    }
+
+    #[tauri::command]
     pub async fn local_backend(handle: State<'_, InferenceHandle>) -> Result<String, ConnectError> {
         Ok(super::local_backend(handle.inner()).await.to_string())
     }
@@ -554,6 +667,11 @@ pub mod __handlers {
                 $crate::commands::__handlers::persist_pairing_bundle,
                 $crate::commands::__handlers::read_stored_jwt,
                 $crate::commands::__handlers::forget_device,
+                $crate::commands::__handlers::list_conversations,
+                $crate::commands::__handlers::create_conversation,
+                $crate::commands::__handlers::append_message,
+                $crate::commands::__handlers::list_messages,
+                $crate::commands::__handlers::delete_conversation,
             ]
         };
     }
