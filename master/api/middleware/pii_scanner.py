@@ -12,12 +12,13 @@ Detection strategy:
 Cloud dispatch gate: content that tests positive must either be masked
 or the user must explicitly set X-Lucifer-Allow-PII: true.
 """
+
 from __future__ import annotations
 
+import enum
 import re
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from master.core.exceptions import PIIDetectedError
 from master.core.logging import get_logger
@@ -25,7 +26,7 @@ from master.core.logging import get_logger
 log = get_logger(__name__)
 
 
-class PIICategory(str, Enum):
+class PIICategory(enum.StrEnum):
     EMAIL = "email"
     PHONE = "phone"
     SSN = "ssn"
@@ -39,19 +40,21 @@ class PIICategory(str, Enum):
 @dataclass
 class PIIMatch:
     """A single detected PII instance."""
+
     category: PIICategory
     start: int
     end: int
-    value: str                # Original matched text
-    masked: str               # Replacement (e.g. "[EMAIL]")
+    value: str  # Original matched text
+    masked: str  # Replacement (e.g. "[EMAIL]")
 
 
 @dataclass
 class ScanResult:
     """Result from PIIScanner.scan()."""
+
     has_pii: bool
     matches: list[PIIMatch] = field(default_factory=list)
-    masked_text: str = ""     # Original text with PII replaced by placeholders
+    masked_text: str = ""  # Original text with PII replaced by placeholders
 
 
 class PIIScanner:
@@ -95,14 +98,14 @@ class PIIScanner:
 
     def __init__(self, use_ner: bool = True) -> None:
         self._use_ner = use_ner
-        self._nlp: object | None = None
+        self._nlp: Any = None
         if use_ner:
             self._load_ner()
 
     def _load_ner(self) -> None:
         """Lazy-load spaCy model (en_core_web_sm)."""
         try:
-            import spacy  # type: ignore[import]
+            import spacy
 
             self._nlp = spacy.load("en_core_web_sm", disable=["parser", "lemmatizer"])
             log.info("pii_scanner.ner.loaded", model="en_core_web_sm")
@@ -133,8 +136,7 @@ class PIIScanner:
 
         # ── NER scan ────────────────────────────────────────────────────────
         if self._use_ner and self._nlp is not None:
-
-            doc = self._nlp(text)  # type: ignore[call-arg]
+            doc = self._nlp(text)
             ner_label_map = {
                 "PERSON": PIICategory.PERSON_NAME,
                 "GPE": PIICategory.LOCATION,

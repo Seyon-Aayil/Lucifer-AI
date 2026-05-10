@@ -5,25 +5,29 @@ Abstract interfaces for LLM providers and related data types.
 ALL provider implementations must satisfy LLMProvider exactly.
 This indirection is what makes Lucifer LLM-agnostic.
 """
+
 from __future__ import annotations
 
+import enum
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any
 
 # ── Enums & Value Types ────────────────────────────────────────────────────────
 
-class ProviderTier(str, Enum):
+
+class ProviderTier(enum.StrEnum):
     """Which deployment tier a provider belongs to."""
-    MASTER = "master"       # Cloud APIs or self-hosted vLLM on master server
-    DESKTOP = "desktop"     # Ollama / MLX on local machine
-    MOBILE = "mobile"       # Core ML / Foundation Models / ONNX
+
+    MASTER = "master"  # Cloud APIs or self-hosted vLLM on master server
+    DESKTOP = "desktop"  # Ollama / MLX on local machine
+    MOBILE = "mobile"  # Core ML / Foundation Models / ONNX
 
 
-class Capability(str, Enum):
+class Capability(enum.StrEnum):
     """Capabilities that a provider may or may not support."""
+
     TEXT = "text"
     VISION = "vision"
     FUNCTION_CALLING = "function_calling"
@@ -35,6 +39,7 @@ class Capability(str, Enum):
 @dataclass(frozen=True)
 class TokenUsage:
     """Token consumption from a single LLM completion call."""
+
     input_tokens: int
     output_tokens: int
     cache_read_tokens: int = 0
@@ -52,9 +57,10 @@ class TokenUsage:
 @dataclass
 class Message:
     """A single turn in a conversation."""
-    role: str                    # "system" | "user" | "assistant" | "tool"
-    content: str | list[Any]     # str for text; list for multimodal (vision)
-    name: str | None = None      # Tool name (for role="tool")
+
+    role: str  # "system" | "user" | "assistant" | "tool"
+    content: str | list[Any]  # str for text; list for multimodal (vision)
+    name: str | None = None  # Tool name (for role="tool")
     tool_call_id: str | None = None
 
 
@@ -64,8 +70,9 @@ class CompletionRequest:
     Unified completion request — provider-agnostic.
     Adapters translate this to their SDK's format.
     """
+
     messages: list[Message]
-    model: str                               # Provider-specific model ID
+    model: str  # Provider-specific model ID
     max_tokens: int = 4096
     temperature: float = 0.7
     stream: bool = False
@@ -77,27 +84,30 @@ class CompletionRequest:
 @dataclass
 class CompletionResponse:
     """Unified completion response from any provider."""
+
     content: str
     model: str
     provider_id: str
     token_usage: TokenUsage
-    finish_reason: str              # "stop" | "length" | "tool_calls" | "error"
+    finish_reason: str  # "stop" | "length" | "tool_calls" | "error"
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
-    raw_response: Any = None        # Original SDK response (for debugging)
+    raw_response: Any = None  # Original SDK response (for debugging)
 
 
 @dataclass
 class StreamChunk:
     """A single streamed delta from a provider."""
+
     delta: str
     is_final: bool = False
     finish_reason: str | None = None
-    token_usage: TokenUsage | None = None   # Populated on is_final=True
+    token_usage: TokenUsage | None = None  # Populated on is_final=True
 
 
 @dataclass
 class ProviderHealth:
     """Health snapshot for a single provider."""
+
     provider_id: str
     is_healthy: bool
     latency_ms: float | None = None
@@ -106,6 +116,7 @@ class ProviderHealth:
 
 
 # ── Abstract Interface ────────────────────────────────────────────────────────
+
 
 class LLMProvider(ABC):
     """
@@ -152,7 +163,7 @@ class LLMProvider(ABC):
         """
 
     @abstractmethod
-    async def stream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
+    def stream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
         """Yield streamed chunks. Last chunk has is_final=True with token_usage."""
 
     @abstractmethod

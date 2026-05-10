@@ -5,6 +5,7 @@ LLMLingua-2 context compressor.
 Compresses long documents and RAG chunks to fit within token budgets.
 Falls back to truncation if the model is unavailable.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ log = get_logger(__name__)
 @dataclass
 class CompressedResult:
     """Output from the compressor pipeline."""
+
     compressed_text: str
     original_tokens: int
     compressed_tokens: int
@@ -44,7 +46,7 @@ class ContextCompressor:
 
     def _load_model(self) -> None:
         try:
-            from llmlingua import PromptCompressor  # type: ignore[import]
+            from llmlingua import PromptCompressor
 
             self._llm_lingua = PromptCompressor(
                 model_name=get_settings().llmlingua_model,
@@ -75,7 +77,7 @@ class ContextCompressor:
             if target_token_count and original_tokens > 0:
                 ratio = min(target_token_count / original_tokens, 1.0)
 
-            result = self._llm_lingua.compress_prompt(  # type: ignore[union-attr]
+            result = self._llm_lingua.compress_prompt(  # type: ignore[attr-defined]
                 context=[text],
                 ratio=ratio,
                 force_tokens=["\\n", ".", "!", "?"],

@@ -15,6 +15,7 @@ Security guarantees:
   - Hard resource caps: 256 MB RAM, 0.5 CPU.
   - Container is always destroyed after disconnect(), never reused across agents.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +35,7 @@ _DOCKER_BRIDGE_NETWORK = "lucifer-mcp"
 _HEALTH_TIMEOUT_SECONDS = 30
 _HEALTH_POLL_INTERVAL = 0.5
 _CONTAINER_MEM_LIMIT = "256m"
-_CONTAINER_CPU_QUOTA = 50_000   # microseconds per 100ms period = 0.5 CPU
+_CONTAINER_CPU_QUOTA = 50_000  # microseconds per 100ms period = 0.5 CPU
 _CONTAINER_EXPOSED_PORT = 8080
 
 
@@ -73,7 +74,7 @@ class DockerTransport(MCPTransport):
 
     async def connect(self) -> None:
         """Pull (if needed), start container, wait for health check."""
-        import docker  # type: ignore[import]
+        import docker
 
         client = docker.DockerClient.from_env()
         container_name = f"lucifer-mcp-{uuid.uuid4().hex[:8]}"
@@ -94,8 +95,8 @@ class DockerTransport(MCPTransport):
                 network=_DOCKER_BRIDGE_NETWORK,
                 mem_limit=_CONTAINER_MEM_LIMIT,
                 cpu_quota=_CONTAINER_CPU_QUOTA,
-                read_only=False,   # some MCP servers need /tmp writes
-                auto_remove=False, # we control removal in disconnect()
+                read_only=False,  # some MCP servers need /tmp writes
+                auto_remove=False,  # we control removal in disconnect()
                 remove=False,
             ),
         )
@@ -119,7 +120,8 @@ class DockerTransport(MCPTransport):
             await self._sse.disconnect()
 
         if self._container_id:
-            import docker  # type: ignore[import]
+            import docker
+
             client = docker.DockerClient.from_env()
 
             def _stop_remove() -> None:
@@ -127,7 +129,7 @@ class DockerTransport(MCPTransport):
                     c = client.containers.get(self._container_id)
                     c.stop(timeout=5)
                     c.remove(force=True)
-                    log.info("docker.mcp.removed", container=self._container_id[:12])
+                    log.info("docker.mcp.removed", container=(self._container_id or "")[:12])
                 except Exception as exc:
                     log.warning("docker.mcp.remove_failed", error=str(exc))
 
@@ -176,4 +178,4 @@ async def _find_free_port() -> int:
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
-        return s.getsockname()[1]
+        return int(s.getsockname()[1])

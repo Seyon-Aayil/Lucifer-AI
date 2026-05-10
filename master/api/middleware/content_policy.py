@@ -13,11 +13,11 @@ Each check returns a PolicyResult with a violation reason if blocked.
 validate() is synchronous and designed to run in a thread-pool executor
 (see PIIScanner precedent in pii_scanner.py).
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
 
 from master.core.logging import get_logger
 
@@ -33,8 +33,8 @@ _INJECTION_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"disregard\s+(all\s+)?(previous|prior|above)\s+instructions?", re.I),
     re.compile(r"forget\s+(all\s+)?(previous|prior|above)\s+instructions?", re.I),
     re.compile(r"you\s+are\s+now\s+(?:a\s+)?(?:dan|jailbreak|unrestricted)", re.I),
-    re.compile(r"\[system\]|\[assistant\]|\[user\]", re.I),          # role-injection
-    re.compile(r"<\|im_start\|>|<\|im_end\|>", re.I),                # token injection
+    re.compile(r"\[system\]|\[assistant\]|\[user\]", re.I),  # role-injection
+    re.compile(r"<\|im_start\|>|<\|im_end\|>", re.I),  # token injection
     re.compile(r"system\s*:\s*you\s+are", re.I),
 ]
 
@@ -42,25 +42,31 @@ _INJECTION_PATTERNS: list[re.Pattern[str]] = [
 _OUTBOUND_LEAK_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(?:password|passwd|secret|token|api[_-]?key)\s*[:=]\s*\S+", re.I),
     re.compile(r"-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----"),
-    re.compile(r"[a-z0-9]{32,}:[a-z0-9]{32,}"),   # likely credential pair
+    re.compile(r"[a-z0-9]{32,}:[a-z0-9]{32,}"),  # likely credential pair
 ]
 
 # Hard blocklist: topics that must never be processed regardless of context.
 # Kept minimal — overly broad blocks degrade UX. This is a last-resort layer.
 _BLOCKLIST_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\b(?:generate|create|write)\b.{0,40}\b(?:malware|ransomware|keylogger|rootkit)\b", re.I),
-    re.compile(r"\b(?:step[s\s-]*by[s\s-]*step|instructions?\s+for)\b.{0,60}\b(?:make|build|create|synthesize)\b.{0,40}\b(?:bomb|explosive|weapon|poison)\b", re.I),
+    re.compile(
+        r"\b(?:generate|create|write)\b.{0,40}\b(?:malware|ransomware|keylogger|rootkit)\b", re.I
+    ),
+    re.compile(
+        r"\b(?:step[s\s-]*by[s\s-]*step|instructions?\s+for)\b.{0,60}\b(?:make|build|create|synthesize)\b.{0,40}\b(?:bomb|explosive|weapon|poison)\b",
+        re.I,
+    ),
     re.compile(r"\b(?:csam|child\s+pornography|child\s+sexual\s+abuse)\b", re.I),
 ]
 
 
 # ── Result type ───────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class PolicyResult:
     allowed: bool
-    violation: str | None = None          # set when allowed=False
-    check: str | None = None              # which check triggered
+    violation: str | None = None  # set when allowed=False
+    check: str | None = None  # which check triggered
 
     @classmethod
     def ok(cls) -> PolicyResult:
@@ -72,6 +78,7 @@ class PolicyResult:
 
 
 # ── Validator ─────────────────────────────────────────────────────────────────
+
 
 class ContentPolicyValidator:
     """

@@ -14,6 +14,7 @@ whose `summary` field contains a 200-token-budget plain-text digest.
 All store failures degrade gracefully — a partial context package is
 always returned so that agent execution is never blocked by memory outages.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +24,6 @@ from master.agents.base.agent import ContextPackage
 from master.agents.librarian.access_control import filter_nodes_for_agent
 from master.agents.librarian.mem0_client import Mem0Client
 from master.agents.librarian.zep_client import ZepClient
-from master.core.config import get_settings
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
 
@@ -108,10 +108,7 @@ class ContextBuilder:
                     q=query,
                 )
                 records = await result.data()
-                return [
-                    {"labels": list(r["n"].labels), **dict(r["n"])}
-                    for r in records
-                ]
+                return [{"labels": list(r["n"].labels), **dict(r["n"])} for r in records]
         except Exception as exc:
             log.warning("context_builder.neo4j_failed", error=str(exc))
             return []
@@ -124,6 +121,7 @@ class ContextBuilder:
 
 
 # ── Summary builder ───────────────────────────────────────────────────────────
+
 
 def _build_summary(
     agent_id: str,
@@ -146,10 +144,7 @@ def _build_summary(
         parts.append("Graph nodes:\n" + "\n".join(node_lines))
 
     if memories:
-        mem_lines = [
-            f"  - {m.get('memory', m.get('content', '?'))[:120]}"
-            for m in memories[:5]
-        ]
+        mem_lines = [f"  - {m.get('memory', m.get('content', '?'))[:120]}" for m in memories[:5]]
         parts.append("Episodic memory:\n" + "\n".join(mem_lines))
 
     if facts:

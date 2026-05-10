@@ -10,6 +10,7 @@ Graph nodes (in order):
 HitL checkpoint: inserted automatically when risk_tier >= HIGH.
 Edges are conditional — failures route to an error_sink node.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,8 +18,6 @@ import uuid
 from typing import Any
 
 import httpx
-
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from master.agents.base.agent import (
@@ -39,6 +38,7 @@ _HITL_TIERS = {RiskTier.HIGH, RiskTier.CRITICAL}
 
 
 # ── Node Implementations ──────────────────────────────────────────────────────
+
 
 async def classify_node(state: OrchestratorState) -> dict[str, Any]:
     """
@@ -97,7 +97,9 @@ async def budget_plan_node(state: OrchestratorState) -> dict[str, Any]:
     with tracer.start_as_current_span("orchestrator.budget_plan"):
         surface = state.get("surface", AgentSurface.WEB)
         budget = TokenBudget.for_surface(surface)
-        log.debug("orchestrator.budget_planned", inputs=budget.input_limit, outputs=budget.output_limit)
+        log.debug(
+            "orchestrator.budget_planned", inputs=budget.input_limit, outputs=budget.output_limit
+        )
         return {"token_budget": budget}
 
 
@@ -131,7 +133,6 @@ async def execute_node(state: OrchestratorState, config: dict[str, Any]) -> dict
         from master.agents.base.agent import AgentResponse
         from master.llm.registry import ProviderRegistry
         from master.mcp.registry import MCPServerRegistry
-        from master.orchestrator.agent_pool import AgentPool
 
         llm_registry = ProviderRegistry.from_settings()
 
@@ -209,7 +210,10 @@ async def synthesize_node(state: OrchestratorState) -> dict[str, Any]:
         elif response and response.status == "escalate":
             content = f"This action requires approval: {response.escalation_reason}"
 
-        return {"final_output": content, "output_metadata": {"status": response.status if response else "error"}}
+        return {
+            "final_output": content,
+            "output_metadata": {"status": response.status if response else "error"},
+        }
 
 
 async def memory_write_node(state: OrchestratorState) -> dict[str, Any]:
@@ -250,6 +254,7 @@ async def error_sink_node(state: OrchestratorState) -> dict[str, Any]:
 
 
 # ── Routing Functions ─────────────────────────────────────────────────────────
+
 
 def _should_hitl(state: OrchestratorState) -> str:
     """After execute: route to hitl if escalation needed, error_sink if failed, else synthesize."""
@@ -292,6 +297,7 @@ def build_graph(checkpointer: Any = None) -> Any:
     """
     if checkpointer is None:
         from langgraph.checkpoint.memory import MemorySaver
+
         checkpointer = MemorySaver()
 
     graph = StateGraph(OrchestratorState)
@@ -316,13 +322,15 @@ def build_graph(checkpointer: Any = None) -> Any:
 
     # Conditional: execute → hitl or synthesize
     graph.add_conditional_edges(
-        "execute", _should_hitl,
+        "execute",
+        _should_hitl,
         {"hitl": "hitl", "synthesize": "synthesize", "error_sink": "error_sink"},
     )
 
     # Conditional: hitl → synthesize or error_sink
     graph.add_conditional_edges(
-        "hitl", _hitl_approved,
+        "hitl",
+        _hitl_approved,
         {"synthesize": "synthesize", "error_sink": "error_sink"},
     )
 
@@ -335,22 +343,19 @@ def build_graph(checkpointer: Any = None) -> Any:
 
 
 _INTENT_CANDIDATES: list[tuple[str, str, RiskTier]] = [
-    ("chat",               "personal-agent",   RiskTier.LOW),
-    ("schedule_meeting",   "personal-agent",   RiskTier.MEDIUM),
-    ("summarise_calendar", "personal-agent",   RiskTier.LOW),
-    ("daily_briefing",     "personal-agent",   RiskTier.LOW),
-    ("code_assist",        "coding-agent",     RiskTier.LOW),
-    ("health_query",       "health-agent",     RiskTier.MEDIUM),
-    ("financial_query",    "financial-agent",  RiskTier.HIGH),
-    ("research",           "research-agent",   RiskTier.LOW),
+    ("chat", "personal-agent", RiskTier.LOW),
+    ("schedule_meeting", "personal-agent", RiskTier.MEDIUM),
+    ("summarise_calendar", "personal-agent", RiskTier.LOW),
+    ("daily_briefing", "personal-agent", RiskTier.LOW),
+    ("code_assist", "coding-agent", RiskTier.LOW),
+    ("health_query", "health-agent", RiskTier.MEDIUM),
+    ("financial_query", "financial-agent", RiskTier.HIGH),
+    ("research", "research-agent", RiskTier.LOW),
 ]
 
 _INTENT_CLASSIFIER_PROMPT = (
     "Classify the user input into one of these intent/agent/risk combinations:\n"
-    + "\n".join(
-        f"- intent={i}, agent={a}, risk={r.value}"
-        for i, a, r in _INTENT_CANDIDATES
-    )
+    + "\n".join(f"- intent={i}, agent={a}, risk={r.value}" for i, a, r in _INTENT_CANDIDATES)
     + '\n\nUser input: "{raw_input}"\n\n'
     'Reply with JSON only: {{"intent": "...", "agent_id": "...", "risk_tier": "..."}}'
 )

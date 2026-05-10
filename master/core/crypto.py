@@ -5,8 +5,11 @@ Cryptographic primitives used across Lucifer AI.
 Provides: Argon2id key derivation, AES-256-GCM encrypt/decrypt.
 All key material is kept in memory only — never logged or persisted as plaintext.
 """
+
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import secrets
 
@@ -16,7 +19,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 # ── Argon2id Configuration (OWASP 2024 minimum) ──────────────────────────────
 _ARGON2 = PasswordHasher(
-    time_cost=3,        # iterations
+    time_cost=3,  # iterations
     memory_cost=65536,  # 64 MB
     parallelism=4,
     hash_len=32,
@@ -28,6 +31,7 @@ _GCM_NONCE_SIZE = 12
 
 
 # ── Key Derivation ────────────────────────────────────────────────────────────
+
 
 def derive_key(password: str) -> str:
     """
@@ -75,6 +79,7 @@ def derive_aes_key(password: str, salt: bytes | None = None) -> tuple[bytes, byt
 
 # ── AES-256-GCM ───────────────────────────────────────────────────────────────
 
+
 def encrypt(plaintext: bytes, key: bytes) -> bytes:
     """
     Encrypt plaintext with AES-256-GCM.
@@ -115,9 +120,6 @@ def decrypt_str(ciphertext_with_nonce: bytes, key: bytes) -> str:
 
 
 # ── HMAC Chain (Audit Log) ────────────────────────────────────────────────────
-
-import hashlib
-import hmac
 
 
 def hmac_sha256(key: bytes, data: bytes) -> str:

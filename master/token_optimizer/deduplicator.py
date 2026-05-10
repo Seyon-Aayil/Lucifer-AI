@@ -4,6 +4,7 @@ master.token_optimizer.deduplicator
 SimHash near-duplicate removal for context chunks.
 Falls back to MD5 exact-dedup when the simhash package is unavailable.
 """
+
 from __future__ import annotations
 
 from master.core.logging import get_logger
@@ -27,7 +28,7 @@ class SemanticDeduplicator:
         preserving original order (first occurrence wins).
         """
         try:
-            from simhash import Simhash, SimhashIndex  # type: ignore[import]
+            from simhash import Simhash, SimhashIndex
 
             unique: list[ContextChunk] = []
             index = SimhashIndex([], k=self._threshold)

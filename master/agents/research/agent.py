@@ -7,6 +7,7 @@ Tools: Notion MCP, GitHub MCP (repo/PR context).
 Intents: research, search_notion, repo_summary, summarise, web_search.
 Risk: LOW for all intents (read-only).
 """
+
 from __future__ import annotations
 
 import time
@@ -17,7 +18,6 @@ from master.agents.base.agent import (
     AgentResponse,
     BaseAgent,
     MemoryDelta,
-    RiskTier,
     TokenUsage,
 )
 from master.core.logging import get_logger
@@ -71,14 +71,14 @@ class ResearchAgent(BaseAgent):
 
     async def _handle_intent(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         handlers: dict[str, Any] = {
-            "research":       self._research,
-            "search_notion":  self._search_notion,
-            "repo_summary":   self._repo_summary,
-            "summarise":      self._summarise,
-            "web_search":     self._web_search_fallback,
+            "research": self._research,
+            "search_notion": self._search_notion,
+            "repo_summary": self._repo_summary,
+            "summarise": self._summarise,
+            "web_search": self._web_search_fallback,
         }
         handler = handlers.get(request.intent, self._research)
-        return await handler(request)
+        return await handler(request)  # type: ignore[no-any-return]
 
     async def _search_notion(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         if self._mcp is None:
@@ -89,10 +89,7 @@ class ResearchAgent(BaseAgent):
         pages: list[dict[str, Any]] = result.output or []
         if not pages:
             return "No Notion pages found for that query.", []
-        lines = [
-            f"- [{p.get('title', '(untitled)')}]({p.get('url', '#')})"
-            for p in pages[:10]
-        ]
+        lines = [f"- [{p.get('title', '(untitled)')}]({p.get('url', '#')})" for p in pages[:10]]
         return "## Notion Results\n\n" + "\n".join(lines), []
 
     async def _repo_summary(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:

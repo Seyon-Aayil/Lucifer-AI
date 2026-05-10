@@ -4,13 +4,14 @@ master.llm.providers.ollama
 Ollama local model adapter.
 Routes through LiteLLM proxy or directly to ollama depending on proxy setup.
 """
+
 from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-import litellm  # type: ignore[import]
+import litellm
 
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
@@ -27,6 +28,7 @@ from master.llm.interfaces import (
 
 log = get_logger(__name__)
 tracer = get_tracer(__name__)
+
 
 class OllamaProvider(LLMProvider):
     """
@@ -56,11 +58,13 @@ class OllamaProvider(LLMProvider):
 
     @property
     def capabilities(self) -> frozenset[Capability]:
-        return frozenset({
-            Capability.TEXT,
-            Capability.STREAMING,
-            Capability.CODE,
-        })
+        return frozenset(
+            {
+                Capability.TEXT,
+                Capability.STREAMING,
+                Capability.CODE,
+            }
+        )
 
     @property
     def cost_per_input_token(self) -> float:
@@ -146,10 +150,12 @@ class OllamaProvider(LLMProvider):
                     input_tokens=chunk.usage.prompt_tokens or 0,
                     output_tokens=chunk.usage.completion_tokens or 0,
                 )
-            yield StreamChunk(delta=delta, is_final=is_final, finish_reason=finish, token_usage=usage)
+            yield StreamChunk(
+                delta=delta, is_final=is_final, finish_reason=finish, token_usage=usage
+            )
 
     async def count_tokens(self, text: str) -> int:
-        return litellm.token_counter(model=f"ollama/{self._model}", text=text)
+        return int(litellm.token_counter(model=f"ollama/{self._model}", text=text))
 
     async def health_check(self) -> ProviderHealth:
         import httpx

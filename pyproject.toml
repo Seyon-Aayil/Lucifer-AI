@@ -110,6 +110,10 @@ dev = [
 target-version = "py312"
 line-length = 100
 src = ["master"]
+exclude = [
+    "master/sync/lucifer_sync_pb2.py",
+    "master/sync/lucifer_sync_pb2_grpc.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "TID"]
@@ -139,8 +143,22 @@ module = [
     "praw.*",
     "arxiv.*",
     "apscheduler.*",
+    "routellm.*",
+    "jsonschema.*",
+    "yaml.*",
+    "spacy.*",
+    "litellm.*",
+    "docker.*",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "master.sync.lucifer_sync_pb2",
+    "master.sync.lucifer_sync_pb2_grpc",
+    "master.sync.auth",
+]
+ignore_errors = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

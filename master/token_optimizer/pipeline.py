@@ -13,6 +13,7 @@ Stages (in order):
 
 Call TokenOptimizer.prepare(context, budget) before every provider.complete() call.
 """
+
 from __future__ import annotations
 
 from master.agents.base.agent import TokenBudget
@@ -23,9 +24,9 @@ from master.token_optimizer.context_profiler import ContextProfiler
 from master.token_optimizer.deduplicator import SemanticDeduplicator
 from master.token_optimizer.semantic_cache import SemanticCache
 from master.token_optimizer.types import (
+    _CHARS_PER_TOKEN,
     ContextChunk,
     PreparedContext,
-    _CHARS_PER_TOKEN,
     estimate_tokens,
 )
 
@@ -69,15 +70,16 @@ class TokenOptimizer:
         cached = await self._cache.get(device_id, combined_prompt)
         if cached:
             log.info("token_optimizer.cache_hit", prompt_len=len(prompt))
-            return PreparedContext(chunks=[], cache_hit=True, cached_response=cached, stages_applied=["cache"])
+            return PreparedContext(
+                chunks=[], cache_hit=True, cached_response=cached, stages_applied=["cache"]
+            )
 
         # ── Stage 2: Budget pre-check ─────────────────────────────────────────
         total = estimate_tokens(prompt) + sum(c.estimated_tokens for c in chunks)
-        if total > budget.input_limit * 3:
-            if not budget.allow_compression:
-                raise TokenBudgetExceededError(
-                    f"Context {total} tokens exceeds budget {budget.input_limit}"
-                )
+        if total > budget.input_limit * 3 and not budget.allow_compression:
+            raise TokenBudgetExceededError(
+                f"Context {total} tokens exceeds budget {budget.input_limit}"
+            )
         stages.append("budget_check")
 
         # ── Stage 3: Relevance scoring (BM25) ────────────────────────────────
@@ -96,13 +98,17 @@ class TokenOptimizer:
             compressed = []
             for chunk in deduped:
                 if chunk.estimated_tokens > budget_per_chunk:
-                    result = self._compressor.compress(chunk.text, target_token_count=budget_per_chunk)
-                    compressed.append(ContextChunk(
-                        text=result.compressed_text,
-                        source=chunk.source,
-                        relevance_score=chunk.relevance_score,
-                        chunk_id=chunk.chunk_id,
-                    ))
+                    result = self._compressor.compress(
+                        chunk.text, target_token_count=budget_per_chunk
+                    )
+                    compressed.append(
+                        ContextChunk(
+                            text=result.compressed_text,
+                            source=chunk.source,
+                            relevance_score=chunk.relevance_score,
+                            chunk_id=chunk.chunk_id,
+                        )
+                    )
                 else:
                     compressed.append(chunk)
             stages.append("compress")
@@ -110,7 +116,9 @@ class TokenOptimizer:
             compressed = deduped
 
         # ── Stage 6: Hierarchical trim ────────────────────────────────────────
-        final_chunks = self._hierarchical_trim(compressed, budget.input_limit - estimate_tokens(prompt))
+        final_chunks = self._hierarchical_trim(
+            compressed, budget.input_limit - estimate_tokens(prompt)
+        )
         stages.append("trim")
 
         total_tokens = estimate_tokens(prompt) + sum(c.estimated_tokens for c in final_chunks)
@@ -126,9 +134,13 @@ class TokenOptimizer:
             final_chunks=len(final_chunks),
             total_tokens=total_tokens,
         )
-        return PreparedContext(chunks=final_chunks, total_tokens=total_tokens, stages_applied=stages)
+        return PreparedContext(
+            chunks=final_chunks, total_tokens=total_tokens, stages_applied=stages
+        )
 
-    def _hierarchical_trim(self, chunks: list[ContextChunk], token_budget: int) -> list[ContextChunk]:
+    def _hierarchical_trim(
+        self, chunks: list[ContextChunk], token_budget: int
+    ) -> list[ContextChunk]:
         """
         Drop lowest-scoring chunks until total fits within token_budget.
         Chunks are already sorted by relevance score descending.
@@ -142,11 +154,13 @@ class TokenOptimizer:
             elif remaining > 100:
                 chars = remaining * _CHARS_PER_TOKEN
                 truncated_text = chunk.text[:chars].rsplit(" ", 1)[0]
-                result.append(ContextChunk(
-                    text=truncated_text,
-                    source=chunk.source,
-                    relevance_score=chunk.relevance_score,
-                ))
+                result.append(
+                    ContextChunk(
+                        text=truncated_text,
+                        source=chunk.source,
+                        relevance_score=chunk.relevance_score,
+                    )
+                )
                 break
             else:
                 break

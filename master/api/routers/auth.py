@@ -9,6 +9,7 @@ Authentication endpoints:
 JWT issuance + single-use refresh token rotation via Postgres + Redis.
 Device records persisted in `devices` table. Refresh token hashes in `refresh_tokens`.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -40,7 +41,7 @@ def _get_db(request: Request) -> asyncpg.Pool:
 
 def _get_redis(request: Request) -> Redis:
     """FastAPI dependency: retrieve async Redis client from app.state."""
-    return request.app.state.redis
+    return request.app.state.redis  # type: ignore[no-any-return]
 
 
 def _get_revocation(request: Request) -> RevocationStore:
@@ -66,7 +67,7 @@ def _token_pair(device_id: str, refresh_raw: str) -> TokenPair:
 )
 async def register_device(
     body: DeviceRegistrationRequest,
-    db: asyncpg.Pool = Depends(_get_db),
+    db: asyncpg.Pool = Depends(_get_db),  # noqa: B008
 ) -> TokenPair:
     """
     Register a new edge device and issue a token pair.
@@ -75,7 +76,9 @@ async def register_device(
     with tracer.start_as_current_span("auth.register_device"):
         settings = get_settings()
         raw_refresh, refresh_hash = create_refresh_token()
-        refresh_expires = datetime.now(UTC) + timedelta(seconds=settings.jwt_refresh_token_ttl_seconds)
+        refresh_expires = datetime.now(UTC) + timedelta(
+            seconds=settings.jwt_refresh_token_ttl_seconds
+        )
 
         async with db.acquire() as conn:
             # Upsert device record
@@ -115,8 +118,8 @@ async def register_device(
 )
 async def refresh_token(
     body: RefreshRequest,
-    db: asyncpg.Pool = Depends(_get_db),
-    revocation: RevocationStore = Depends(_get_revocation),
+    db: asyncpg.Pool = Depends(_get_db),  # noqa: B008
+    revocation: RevocationStore = Depends(_get_revocation),  # noqa: B008
 ) -> TokenPair:
     """
     Single-use refresh token rotation.
@@ -161,7 +164,9 @@ async def refresh_token(
 
             # Issue new refresh token
             raw_refresh, new_hash = create_refresh_token()
-            refresh_expires = datetime.now(UTC) + timedelta(seconds=settings.jwt_refresh_token_ttl_seconds)
+            refresh_expires = datetime.now(UTC) + timedelta(
+                seconds=settings.jwt_refresh_token_ttl_seconds
+            )
             await conn.execute(
                 "INSERT INTO refresh_tokens (device_id, token_hash, expires_at) VALUES ($1, $2, $3)",
                 body.device_id,
@@ -180,8 +185,8 @@ async def refresh_token(
 )
 async def revoke_device(
     body: RevokeRequest,
-    revocation: RevocationStore = Depends(_get_revocation),
-    db: asyncpg.Pool = Depends(_get_db),
+    revocation: RevocationStore = Depends(_get_revocation),  # noqa: B008
+    db: asyncpg.Pool = Depends(_get_db),  # noqa: B008
 ) -> None:
     """
     Revoke a device: marks it revoked in Postgres + propagates to Redis within 60s.

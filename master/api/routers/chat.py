@@ -8,12 +8,14 @@ Chat endpoints:
 Every inbound message is PII-scanned before entering the orchestrator.
 Token usage and cost are returned in every response.
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import time
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 
@@ -72,9 +74,6 @@ async def _check_content_policy(text: str, direction: str) -> None:
         )
 
 
-from typing import Any
-
-
 def _get_graph(request: Request) -> Any:
     """Return the Postgres-backed graph from app state, falling back to in-memory."""
     return getattr(request.app.state, "graph", _graph_fallback)
@@ -91,7 +90,7 @@ async def _run_graph(
         }
     }
     graph = _get_graph(request)
-    result: OrchestratorState = await graph.ainvoke(state, config=config)  # type: ignore[arg-type,call-overload]
+    result: OrchestratorState = await graph.ainvoke(state, config=config)
     return result
 
 
@@ -115,7 +114,10 @@ async def chat(
             await _check_content_policy(body.message, "input")
         except PIIDetectedError as exc:
             from fastapi import HTTPException
-            raise HTTPException(status_code=422, detail={"error": "pii_detected", "message": str(exc)})
+
+            raise HTTPException(
+                status_code=422, detail={"error": "pii_detected", "message": str(exc)}
+            ) from exc
 
         task_id = str(uuid.uuid4())
         trace_id = str(uuid.uuid4())
@@ -141,7 +143,8 @@ async def chat(
         except Exception as exc:
             log.error("chat.orchestrator.failed", error=str(exc), trace_id=trace_id)
             from fastapi import HTTPException
-            raise HTTPException(status_code=500, detail={"error": "orchestration_failed"})
+
+            raise HTTPException(status_code=500, detail={"error": "orchestration_failed"}) from exc
 
         latency_ms = int((time.monotonic() - start) * 1000)
         agent_id = final_state.get("agent_id", "personal-agent")
@@ -165,7 +168,9 @@ async def chat(
             content=response_text,
             surface=body.surface,
             token_usage=TokenUsageSchema(
-                input_tokens=0, output_tokens=0, total_tokens=0  # filled by agent in Phase 3
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,  # filled by agent in Phase 3
             ),
             cost_usd=None,
             latency_ms=latency_ms,
@@ -216,7 +221,9 @@ async def chat_websocket(websocket: WebSocket) -> None:
                         "mcp_registry": mcp_registry,
                     }
                 }
-                async for event in ws_graph.astream_events(initial_state, config=config, version="v2"):  # type: ignore[arg-type,attr-defined]
+                async for event in ws_graph.astream_events(
+                    initial_state, config=config, version="v2"
+                ):
                     if event["event"] == "on_chain_stream":
                         chunk_data = event.get("data", {}).get("chunk", {})
                         if isinstance(chunk_data, dict):

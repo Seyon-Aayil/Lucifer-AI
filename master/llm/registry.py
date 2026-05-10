@@ -15,6 +15,7 @@ Usage:
     )
     response = await provider.complete(req)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -136,7 +137,7 @@ class ProviderRegistry:
         """
         try:
             if self._routellm is None:
-                from routellm.controller import Controller  # type: ignore[import]
+                from routellm.controller import Controller
 
                 self._routellm = Controller(
                     routers=["mf"],  # matrix-factorisation router (fast)
@@ -172,7 +173,9 @@ class ProviderRegistry:
 
             # RouteLLM: pick preferred provider ID
             score = await self._routellm_score(query)
-            preferred_id = self._strong_model_id if score >= self._routellm_threshold else self._weak_model_id
+            preferred_id = (
+                self._strong_model_id if score >= self._routellm_threshold else self._weak_model_id
+            )
             log.debug(
                 "routellm.route",
                 score=round(score, 3),
@@ -203,8 +206,10 @@ class ProviderRegistry:
     ) -> list[LLMProvider]:
         """Return providers sorted: preferred first, then by cost ascending."""
         all_candidates = [
-            p for p in self._providers.values()
-            if p.tier == tier and p.supports(*caps)
+            p
+            for p in self._providers.values()
+            if p.tier == tier
+            and p.supports(*caps)
             and p.cost_per_input_token * 4096 <= max_budget_usd  # rough budget filter
         ]
         preferred = [p for p in all_candidates if p.provider_id == preferred_id]

@@ -7,6 +7,7 @@ Tools: GitHub MCP.
 Intents: review_pr, analyse_pr, create_issue, repo_summary, code_assist.
 Risk: LOW for reads; MEDIUM for create_issue.
 """
+
 from __future__ import annotations
 
 import time
@@ -17,7 +18,6 @@ from master.agents.base.agent import (
     AgentResponse,
     BaseAgent,
     MemoryDelta,
-    RiskTier,
     TokenUsage,
 )
 from master.core.logging import get_logger
@@ -74,14 +74,14 @@ class CodingAgent(BaseAgent):
 
     async def _handle_intent(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         handlers: dict[str, Any] = {
-            "review_pr":    self._review_pr,
-            "analyse_pr":   self._review_pr,
+            "review_pr": self._review_pr,
+            "analyse_pr": self._review_pr,
             "create_issue": self._create_issue,
             "repo_summary": self._repo_summary,
-            "code_assist":  self._code_assist,
+            "code_assist": self._code_assist,
         }
         handler = handlers.get(request.intent, self._code_assist)
-        return await handler(request)
+        return await handler(request)  # type: ignore[no-any-return]
 
     async def _review_pr(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         if self._mcp is None:

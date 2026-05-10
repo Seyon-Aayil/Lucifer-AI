@@ -4,24 +4,28 @@ master.api.schemas
 Pydantic v2 request/response schemas for all API endpoints.
 Schemas are strict — no extra fields allowed. All datetimes UTC.
 """
+
 from __future__ import annotations
 
+import enum
 from datetime import datetime
-from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 # ── Shared Base ──────────────────────────────────────────────────────────────
 
+
 class StrictModel(BaseModel):
     """Base model: forbids extra fields, uses enum values."""
+
     model_config = ConfigDict(extra="forbid", use_enum_values=True, populate_by_name=True)
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
-class DeviceType(str, Enum):
+
+class DeviceType(enum.StrEnum):
     DESKTOP_MAC = "desktop-mac"
     DESKTOP_WIN = "desktop-win"
     IOS = "ios"
@@ -34,17 +38,25 @@ class DeviceType(str, Enum):
 
 class DeviceRegistrationRequest(StrictModel):
     """Request body for POST /auth/device/register."""
-    device_id: str = Field(..., min_length=16, max_length=128,
-                           description="Hashed device fingerprint (client-side derived)")
+
+    device_id: str = Field(
+        ...,
+        min_length=16,
+        max_length=128,
+        description="Hashed device fingerprint (client-side derived)",
+    )
     device_type: DeviceType
     name: str | None = Field(None, max_length=64)
     app_version: str = Field(..., max_length=32)
     os_version: str | None = Field(None, max_length=64)
-    public_key: str | None = Field(None, description="Ed25519 public key (DER, base64) for future mTLS")
+    public_key: str | None = Field(
+        None, description="Ed25519 public key (DER, base64) for future mTLS"
+    )
 
 
 class TokenPair(StrictModel):
     """Issued token pair returned on registration and refresh."""
+
     access_token: str
     refresh_token: str
     token_type: str = "Bearer"
@@ -54,19 +66,22 @@ class TokenPair(StrictModel):
 
 class RefreshRequest(StrictModel):
     """Request body for POST /auth/token/refresh."""
+
     refresh_token: str
     device_id: str
 
 
 class RevokeRequest(StrictModel):
     """Request body for POST /auth/device/revoke."""
+
     device_id: str
     reason: str | None = None
 
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
-class Surface(str, Enum):
+
+class Surface(enum.StrEnum):
     WATCH = "watch"
     MOBILE = "mobile"
     DESKTOP = "desktop"
@@ -77,6 +92,7 @@ class Surface(str, Enum):
 
 class ChatRequest(StrictModel):
     """Request body for POST /v1/chat."""
+
     message: str = Field(..., min_length=1, max_length=32_000)
     surface: Surface = Surface.WEB
     session_id: str | None = None
@@ -87,6 +103,7 @@ class ChatRequest(StrictModel):
 
 class ChatResponse(StrictModel):
     """Synchronous chat response."""
+
     task_id: str
     agent_id: str
     content: str
@@ -99,6 +116,7 @@ class ChatResponse(StrictModel):
 
 class ChatChunk(StrictModel):
     """Streaming chunk emitted via WebSocket or SSE."""
+
     task_id: str
     delta: str
     is_final: bool = False
@@ -107,6 +125,7 @@ class ChatChunk(StrictModel):
 
 class TokenUsageSchema(StrictModel):
     """Token consumption for a single LLM call or full agent turn."""
+
     input_tokens: int
     output_tokens: int
     cache_read_tokens: int = 0
@@ -117,8 +136,9 @@ class TokenUsageSchema(StrictModel):
 
 # ── Health ────────────────────────────────────────────────────────────────────
 
+
 class ServiceStatus(StrictModel):
-    status: str          # "ok" | "degraded" | "error" | "not_initialised"
+    status: str  # "ok" | "degraded" | "error" | "not_initialised"
     latency_ms: float | None = None
     error: str | None = None
 

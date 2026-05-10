@@ -5,6 +5,7 @@ FastAPI application factory and lifespan context manager.
 Initialises all infrastructure connections at startup and tears them down
 cleanly on shutdown. All routers registered here.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
@@ -12,12 +13,11 @@ from contextlib import asynccontextmanager
 
 import asyncpg
 import nats
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from redis.asyncio import Redis
-
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from master.agents.librarian.decay_scheduler import DecayScheduler
 from master.agents.librarian.graph_client import GraphClient
@@ -70,6 +70,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # ── AsyncPostgresSaver — persistent LangGraph checkpointer ──────────────
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
     pg_checkpointer = AsyncPostgresSaver.from_conn_string(settings.database_url)
     await pg_checkpointer.setup()  # creates checkpoint tables if not present
     app.state.graph = build_graph(checkpointer=pg_checkpointer)
@@ -103,18 +104,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # ── Create JetStream streams (idempotent) ────────────────────────────────
     stream_subjects = {
-        "lucifer-agents":    ["agent.task.>"],
-        "lucifer-memory":    ["memory.delta.>"],
+        "lucifer-agents": ["agent.task.>"],
+        "lucifer-memory": ["memory.delta.>"],
         "lucifer-telemetry": ["telemetry.event.>"],
-        "lucifer-news":      ["news.fetch.>"],
-        "lucifer-sync":      ["sync.edge.>"],
-        "lucifer-alerts":    ["alert.>"],
+        "lucifer-news": ["news.fetch.>"],
+        "lucifer-sync": ["sync.edge.>"],
+        "lucifer-alerts": ["alert.>"],
     }
+    import contextlib
+
     for stream_name, subjects in stream_subjects.items():
-        try:
+        with contextlib.suppress(Exception):  # Stream already exists
             await js.add_stream(name=stream_name, subjects=subjects)
-        except Exception:
-            pass  # Stream already exists
     log.info("nats.streams_ready")
 
     yield  # ── Application is running ────────────────────────────────────────
@@ -131,7 +132,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await db_pool.close()
     await redis_client.aclose()
     log.info("lucifer.shutdown.complete")
-
 
 
 def create_app() -> FastAPI:
@@ -155,11 +155,7 @@ def create_app() -> FastAPI:
     )
 
     # ── CORS ────────────────────────────────────────────────────────────────
-    origins = (
-        ["http://localhost:3000", "http://localhost:5173"]
-        if settings.is_development
-        else []
-    )
+    origins = ["http://localhost:3000", "http://localhost:5173"] if settings.is_development else []
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -169,10 +165,7 @@ def create_app() -> FastAPI:
     )
 
     redis_client = Redis.from_url(settings.redis_url)
-    app.add_middleware(
-        AuthMiddleware,
-        revocation_store=RevocationStore(redis_client)
-    )
+    app.add_middleware(AuthMiddleware, revocation_store=RevocationStore(redis_client))
 
     # ── Routers ─────────────────────────────────────────────────────────────
     app.include_router(health.router, prefix="/health", tags=["health"])

@@ -5,16 +5,17 @@ Centralised application configuration loaded from environment variables.
 Uses Pydantic Settings for type-safe, validated configuration.
 All secrets are read at startup — no runtime .env parsing in hot paths.
 """
+
 from __future__ import annotations
 
-from enum import Enum
+import enum
 from functools import lru_cache
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Environment(str, Enum):
+class Environment(enum.StrEnum):
     DEVELOPMENT = "development"
     STAGING = "staging"
     PRODUCTION = "production"
@@ -104,9 +105,7 @@ class Settings(BaseSettings):
     semantic_cache_enabled: bool = True
 
     # ── Token Optimizer ────────────────────────────────────────────────────
-    llmlingua_model: str = (
-        "microsoft/llmlingua-2-bert-large-multilingual-cased-meetingbank"
-    )
+    llmlingua_model: str = "microsoft/llmlingua-2-bert-large-multilingual-cased-meetingbank"
     token_optimizer_enabled: bool = True
 
     # ── OpenTelemetry ───────────────────────────────────────────────────────
@@ -116,6 +115,16 @@ class Settings(BaseSettings):
     # ── News Sync ──────────────────────────────────────────────────────────
     news_scheduler_enabled: bool = True
     news_default_fetch_cadence_minutes: int = 60
+
+    # ── gRPC Sync (Phase 4a) ───────────────────────────────────────────────
+    grpc_bind_addr: str = "0.0.0.0:50051"
+    grpc_tls_cert_path: str | None = None
+    grpc_tls_key_path: str | None = None
+    grpc_tls_client_ca_path: str | None = None
+    grpc_sync_enabled: bool = True
+    sync_max_subgraph_bytes: int = 50 * 1024 * 1024  # 50 MiB
+    sync_max_offline_actions: int = 10_000
+    sync_subgraph_lookback_days: int = 30
 
     # ── Model Upgrade ──────────────────────────────────────────────────────
     benchmark_enabled: bool = True

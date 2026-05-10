@@ -6,10 +6,11 @@ Maps (agent_id, node_type) → permitted operations (read/write/none).
 Raises PermissionDeniedError on violations.
 See ARCHITECTURE.md §5.3 for the authoritative matrix.
 """
+
 from __future__ import annotations
 
-from enum import Enum
-from typing import Literal
+import enum
+from typing import Any, Literal
 
 from master.core.exceptions import PermissionDeniedError
 from master.core.logging import get_logger
@@ -19,7 +20,7 @@ log = get_logger(__name__)
 Operation = Literal["read", "write"]
 
 
-class NodeType(str, Enum):
+class NodeType(enum.StrEnum):
     PERSON = "Person"
     PLACE = "Place"
     EVENT = "Event"
@@ -31,7 +32,7 @@ class NodeType(str, Enum):
     NEWS = "News"
 
 
-class RelationType(str, Enum):
+class RelationType(enum.StrEnum):
     WORKS_WITH = "WORKS_WITH"
     AUTHORED = "AUTHORED"
     ABOUT = "ABOUT"
@@ -50,45 +51,45 @@ class RelationType(str, Enum):
 
 _ACL: dict[str, dict[str, set[str]]] = {
     "financial-agent": {
-        NodeType.PERSON:       {"read"},
-        NodeType.FINANCIAL:    {"read", "write"},
-        NodeType.ARTIFACT:     {"read"},
-        NodeType.TASK:         {"read", "write"},
-        NodeType.NEWS:         {"read"},
+        NodeType.PERSON: {"read"},
+        NodeType.FINANCIAL: {"read", "write"},
+        NodeType.ARTIFACT: {"read"},
+        NodeType.TASK: {"read", "write"},
+        NodeType.NEWS: {"read"},
     },
     "health-agent": {
-        NodeType.PERSON:       {"read"},
-        NodeType.HEALTH_RECORD:{"read", "write"},
-        NodeType.ARTIFACT:     {"read"},
-        NodeType.TASK:         {"read", "write"},
-        NodeType.NEWS:         {"read"},
+        NodeType.PERSON: {"read"},
+        NodeType.HEALTH_RECORD: {"read", "write"},
+        NodeType.ARTIFACT: {"read"},
+        NodeType.TASK: {"read", "write"},
+        NodeType.NEWS: {"read"},
     },
     "coding-agent": {
-        NodeType.PERSON:       {"read"},
-        NodeType.ARTIFACT:     {"read", "write"},
-        NodeType.TASK:         {"read", "write"},
-        NodeType.NEWS:         {"read"},
+        NodeType.PERSON: {"read"},
+        NodeType.ARTIFACT: {"read", "write"},
+        NodeType.TASK: {"read", "write"},
+        NodeType.NEWS: {"read"},
     },
     "personal-agent": {
-        NodeType.PERSON:       {"read", "write"},
-        NodeType.PLACE:        {"read", "write"},
-        NodeType.EVENT:        {"read", "write"},
-        NodeType.HEALTH_RECORD:{"read"},
-        NodeType.FINANCIAL:    {"read"},
-        NodeType.ARTIFACT:     {"read", "write"},
-        NodeType.TASK:         {"read", "write"},
-        NodeType.NEWS:         {"read", "write"},
+        NodeType.PERSON: {"read", "write"},
+        NodeType.PLACE: {"read", "write"},
+        NodeType.EVENT: {"read", "write"},
+        NodeType.HEALTH_RECORD: {"read"},
+        NodeType.FINANCIAL: {"read"},
+        NodeType.ARTIFACT: {"read", "write"},
+        NodeType.TASK: {"read", "write"},
+        NodeType.NEWS: {"read", "write"},
     },
     "research-agent": {
-        NodeType.PERSON:       {"read"},
-        NodeType.CONCEPT:      {"read", "write"},
-        NodeType.ARTIFACT:     {"read", "write"},
-        NodeType.TASK:         {"read"},
-        NodeType.NEWS:         {"read", "write"},
+        NodeType.PERSON: {"read"},
+        NodeType.CONCEPT: {"read", "write"},
+        NodeType.ARTIFACT: {"read", "write"},
+        NodeType.TASK: {"read"},
+        NodeType.NEWS: {"read", "write"},
     },
     "news-agent": {
-        NodeType.ARTIFACT:     {"write"},
-        NodeType.NEWS:         {"read", "write"},
+        NodeType.ARTIFACT: {"write"},
+        NodeType.NEWS: {"read", "write"},
     },
     # Librarian has full access — not listed here; checked separately
 }
@@ -126,13 +127,13 @@ def check_permission(agent_id: str, node_type: str, operation: Operation) -> Non
 
 
 def filter_nodes_for_agent(
-    agent_id: str, nodes: list[dict], operation: Operation = "read"
-) -> list[dict]:
+    agent_id: str, nodes: list[dict[str, Any]], operation: Operation = "read"
+) -> list[dict[str, Any]]:
     """
     Filter a list of raw node dicts to only those the agent can access.
     Silently drops nodes the agent cannot read — does not raise.
     """
-    allowed: list[dict] = []
+    allowed: list[dict[str, Any]] = []
     for node in nodes:
         node_type = node.get("labels", [None])[0] or node.get("type", "")
         try:

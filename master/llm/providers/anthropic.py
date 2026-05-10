@@ -5,13 +5,14 @@ Anthropic Claude adapter (claude-opus-4, claude-sonnet-4-5, claude-haiku-4).
 Routes through LiteLLM proxy so budget caps and fallback chains are enforced.
 Never instantiate the Anthropic SDK directly — always go via litellm client.
 """
+
 from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-import litellm  # type: ignore[import]
+import litellm
 
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
@@ -32,9 +33,9 @@ tracer = get_tracer(__name__)
 # Map of supported Anthropic models with cost per million tokens (USD)
 _MODEL_COSTS: dict[str, tuple[float, float]] = {
     # model_id: (input_cost_per_token, output_cost_per_token)
-    "claude-opus-4":       (15.0 / 1_000_000,  75.0 / 1_000_000),
-    "claude-sonnet-4-5":   ( 3.0 / 1_000_000,  15.0 / 1_000_000),
-    "claude-haiku-4":      ( 0.25 / 1_000_000,  1.25 / 1_000_000),
+    "claude-opus-4": (15.0 / 1_000_000, 75.0 / 1_000_000),
+    "claude-sonnet-4-5": (3.0 / 1_000_000, 15.0 / 1_000_000),
+    "claude-haiku-4": (0.25 / 1_000_000, 1.25 / 1_000_000),
 }
 
 
@@ -70,13 +71,15 @@ class AnthropicProvider(LLMProvider):
 
     @property
     def capabilities(self) -> frozenset[Capability]:
-        return frozenset({
-            Capability.TEXT,
-            Capability.VISION,
-            Capability.FUNCTION_CALLING,
-            Capability.STREAMING,
-            Capability.CODE,
-        })
+        return frozenset(
+            {
+                Capability.TEXT,
+                Capability.VISION,
+                Capability.FUNCTION_CALLING,
+                Capability.STREAMING,
+                Capability.CODE,
+            }
+        )
 
     @property
     def cost_per_input_token(self) -> float:
@@ -176,10 +179,12 @@ class AnthropicProvider(LLMProvider):
                     input_tokens=chunk.usage.prompt_tokens or 0,
                     output_tokens=chunk.usage.completion_tokens or 0,
                 )
-            yield StreamChunk(delta=delta, is_final=is_final, finish_reason=finish, token_usage=usage)
+            yield StreamChunk(
+                delta=delta, is_final=is_final, finish_reason=finish, token_usage=usage
+            )
 
     async def count_tokens(self, text: str) -> int:
-        return litellm.token_counter(model=f"anthropic/{self._model}", text=text)
+        return int(litellm.token_counter(model=f"anthropic/{self._model}", text=text))
 
     async def health_check(self) -> ProviderHealth:
         import httpx

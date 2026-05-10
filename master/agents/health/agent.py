@@ -14,6 +14,7 @@ Tools: None (HealthKit data accessed via local store only; no MCP).
 Intents: health_query, medication_reminder, activity_summary, sleep_summary.
 Risk: MEDIUM for all read intents.
 """
+
 from __future__ import annotations
 
 import time
@@ -24,7 +25,6 @@ from master.agents.base.agent import (
     AgentResponse,
     BaseAgent,
     MemoryDelta,
-    RiskTier,
     TokenUsage,
 )
 from master.core.config import get_settings
@@ -78,13 +78,13 @@ class HealthAgent(BaseAgent):
 
     async def _handle_intent(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         handlers: dict[str, Any] = {
-            "health_query":        self._health_query,
+            "health_query": self._health_query,
             "medication_reminder": self._medication_reminder,
-            "activity_summary":    self._activity_summary,
-            "sleep_summary":       self._sleep_summary,
+            "activity_summary": self._activity_summary,
+            "sleep_summary": self._sleep_summary,
         }
         handler = handlers.get(request.intent, self._health_query)
-        return await handler(request)
+        return await handler(request)  # type: ignore[no-any-return]
 
     async def _activity_summary(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         # Phase 3: read from local HealthKit store and summarise

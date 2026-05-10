@@ -12,6 +12,7 @@ Tools: None (financial data stays local; no external MCP for finances).
 Intents: check_budget, spending_summary, set_alert, financial_query.
 Risk: HIGH for all intents.
 """
+
 from __future__ import annotations
 
 import time
@@ -88,12 +89,12 @@ class FinancialAgent(BaseAgent):
 
     async def _handle_intent(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         handlers: dict[str, Any] = {
-            "check_budget":      self._check_budget,
-            "spending_summary":  self._spending_summary,
-            "financial_query":   self._financial_query,
+            "check_budget": self._check_budget,
+            "spending_summary": self._spending_summary,
+            "financial_query": self._financial_query,
         }
         handler = handlers.get(request.intent, self._financial_query)
-        return await handler(request)
+        return await handler(request)  # type: ignore[no-any-return]
 
     async def _check_budget(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         # Phase 3: query SpendTracker / local financial store

@@ -12,6 +12,7 @@ Pipeline stages:
 The pipeline is idempotent: re-running for the same URLs is a no-op
 because GraphClient.upsert_node() uses MERGE on node id.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -58,7 +59,11 @@ class NewsPipeline:
         """
         with tracer.start_as_current_span("news_pipeline.run"):
             stats: dict[str, int] = {
-                "fetched": 0, "scored": 0, "deduped": 0, "written": 0, "errors": 0,
+                "fetched": 0,
+                "scored": 0,
+                "deduped": 0,
+                "written": 0,
+                "errors": 0,
             }
             now = datetime.now(UTC)
 
@@ -69,7 +74,7 @@ class NewsPipeline:
             )
             raw_articles: list[RawArticle] = []
             for result in fetch_results:
-                if isinstance(result, Exception):
+                if isinstance(result, BaseException):
                     log.warning("news_pipeline.fetch_error", error=str(result))
                     stats["errors"] += 1
                 else:
@@ -126,9 +131,7 @@ class NewsPipeline:
             "author": article.author or "",
             "tags": ",".join(article.tags),
             "relevance_score": round(score, 4),
-            "published_at": (
-                article.published_at.isoformat() if article.published_at else ""
-            ),
+            "published_at": (article.published_at.isoformat() if article.published_at else ""),
             "decayScore": score,
         }
         await self._gc.upsert_node(NodeType.NEWS.value, article.url_hash, attributes)
@@ -139,9 +142,8 @@ class NewsPipeline:
 
 # ── Scoring ───────────────────────────────────────────────────────────────────
 
-def _score_articles(
-    articles: list[RawArticle], now: datetime
-) -> list[tuple[RawArticle, float]]:
+
+def _score_articles(articles: list[RawArticle], now: datetime) -> list[tuple[RawArticle, float]]:
     """
     Score each article 0.0–1.0 combining recency and a content length signal.
     recency:  exponential decay based on hours since publication

@@ -6,6 +6,7 @@ Access tokens: 1h TTL, signed HS256.
 Refresh tokens: 7d TTL, stored as hashed single-use tokens.
 All validation raises domain exceptions — never returns None on failure.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -28,16 +29,19 @@ def _settings() -> Any:
 
 # ── Token Payload Schema ──────────────────────────────────────────────────────
 
+
 class TokenClaims:
     """Standard claim keys used in Lucifer JWTs."""
-    SUBJECT = "sub"         # device_id
+
+    SUBJECT = "sub"  # device_id
     ISSUED_AT = "iat"
     EXPIRY = "exp"
-    TOKEN_TYPE = "type"     # "access" | "refresh"
-    JTI = "jti"             # Unique token ID (for revocation)
+    TOKEN_TYPE = "type"  # "access" | "refresh"
+    JTI = "jti"  # Unique token ID (for revocation)
 
 
 # ── Access Token ──────────────────────────────────────────────────────────────
+
 
 def create_access_token(device_id: str) -> str:
     """
@@ -53,7 +57,7 @@ def create_access_token(device_id: str) -> str:
         TokenClaims.ISSUED_AT: now,
         TokenClaims.EXPIRY: now + timedelta(seconds=settings.jwt_access_token_ttl_seconds),
     }
-    token = jwt.encode(payload, settings.app_secret_key, algorithm=settings.jwt_algorithm)
+    token: str = jwt.encode(payload, settings.app_secret_key, algorithm=settings.jwt_algorithm)
     log.debug("jwt.access_token.issued", device_id=device_id)
     return token
 
@@ -93,6 +97,7 @@ def get_device_id_from_token(token: str) -> str:
 
 
 # ── Refresh Token ─────────────────────────────────────────────────────────────
+
 
 def create_refresh_token() -> tuple[str, str]:
     """

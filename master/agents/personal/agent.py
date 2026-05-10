@@ -8,6 +8,7 @@ Handles intents: schedule_meeting, set_reminder, compose_message,
 Tools: Gmail MCP, Google Calendar MCP, Notion MCP, Slack MCP (stub).
 Context: Person + Task + Event + News nodes from Librarian (ACL-filtered).
 """
+
 from __future__ import annotations
 
 import time
@@ -86,9 +87,7 @@ class PersonalAgent(BaseAgent):
                 cost_usd=0.0,
             )
 
-    async def _handle_intent(
-        self, request: AgentRequest
-    ) -> tuple[str, list[MemoryDelta]]:
+    async def _handle_intent(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         """Dispatch to the appropriate handler based on intent."""
         handlers: dict[str, Any] = {
             "schedule_meeting": self._schedule_meeting,
@@ -97,7 +96,7 @@ class PersonalAgent(BaseAgent):
             "chat": self._chat,
         }
         handler = handlers.get(request.intent, self._chat)
-        return await handler(request)
+        return await handler(request)  # type: ignore[no-any-return]
 
     async def _chat(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         """General chat: build context-aware prompt, call LLM, return response."""
@@ -135,8 +134,7 @@ class PersonalAgent(BaseAgent):
         if not events:
             return "No upcoming events found.", []
         lines = [
-            f"- **{e.get('summary', '(no title)')}** — "
-            f"{e.get('start', {}).get('dateTime', 'TBD')}"
+            f"- **{e.get('summary', '(no title)')}** — {e.get('start', {}).get('dateTime', 'TBD')}"
             for e in events
         ]
         return "## Calendar\n\n" + "\n".join(lines), []
@@ -149,11 +147,15 @@ class PersonalAgent(BaseAgent):
         if not slot_result.success or not slot_result.output:
             return f"Could not find a free slot: {slot_result.error}", []
         slot: dict[str, Any] = slot_result.output
-        create_result = await self._mcp.invoke("gcal", "create_event", {
-            "summary": request.raw_input,
-            "start": slot.get("start"),
-            "end": slot.get("end"),
-        })
+        create_result = await self._mcp.invoke(
+            "gcal",
+            "create_event",
+            {
+                "summary": request.raw_input,
+                "start": slot.get("start"),
+                "end": slot.get("end"),
+            },
+        )
         if not create_result.success:
             return f"Failed to create event: {create_result.error}", []
         return f"Meeting scheduled: {create_result.output}", []
