@@ -423,10 +423,27 @@ Priority order:
 
 **Phase 4a DoD met.** Phase 4b (Tauri 2.0 desktop client — macOS first) may now begin.
 
-### Phase 4b — Tauri 2.0 Desktop Client (⏳ Planned)
-- macOS first; Windows deferred
-- Rust core + React frontend; Ollama sidecar + MLX; sqlite-vec edge graph
-- gRPC client (`tonic`) with mTLS; offline queue replay; hotkey overlay; menu-bar
+### Phase 4b — Tauri 2.0 Desktop Client (✅ Foundation Complete)
+
+**DoD:** macOS app builds + launches with main window, frameless overlay,
+tray icon, ⌘+Space hotkey, mTLS gRPC client, offline queue, sqlite-vec
+edge KG mirror, Ollama sidecar runner. React frontend renders all six
+Stitch-designed surfaces.
+
+1. **Rust workspace at `edge/`** ✅ — 7 crates pinned to Rust 1.81, tonic 0.12, prost 0.13
+2. **`sync-client`** ✅ — gRPC + mTLS channel, JWT bearer interceptor with hot-swap, RPC helpers for SyncStream / GetHotSubgraph / PushTelemetry; bundled `protoc-bin-vendored`
+3. **`desktop-bindings`** ✅ — Tauri 2.0 IPC commands wrapping sync-client; `ClientHandle` singleton + `handlers!()` macro for `tauri::generate_handler!`
+4. **`edge-store`** ✅ — SQLite + sqlite-vec mirror of master Neo4j hot-subgraph; vec0 KNN over 1536-dim embeddings; atomic manifest application
+5. **`offline-queue`** ✅ — SQLite WAL FIFO with 10K cap, retry-until-MAX_ATTEMPTS, in-flight recovery on startup, oldest-first eviction
+6. **`ollama-sidecar`** ✅ — spawns `ollama serve` (kill_on_drop), waits ready, streams `/api/generate` and `/api/chat` as `Stream<GenerateChunk>`
+7. **`edge-cli`** ✅ — `lucifer-edge` smoke-test binary: ping / store-stats / enqueue / claim / ollama-list / ollama-generate
+8. **`desktop`** ✅ — Tauri 2.0 binary; main + overlay windows; tray icon with menu; ⌘+Space global hotkey via `tauri-plugin-global-shortcut`; ImageMagick-generated RGBA icons + .icns + .ico
+9. **`desktop/frontend`** ✅ — Vite 5 + React 18 + TypeScript strict + Tailwind 3; HashRouter for window-internal nav; six screens (Conversation, HotkeyOverlay, MenuBar, KnowledgeGraph, Approvals, Onboarding) wired via `invoke()` to the Rust IPC layer
+10. **Test coverage** ✅ — 49 Rust unit tests, clippy --workspace --all-targets -D warnings clean
+
+**Phase 4b foundation DoD met.** Remaining for production ship: macOS
+code-signing + notarised .dmg via `tauri build`, MLX integration, hotkey
+preferences UI, then Phase 4c.
 
 ### Phase 4c — Tauri Mobile Go/No-Go (⏳ Planned)
 - Evaluate Tauri 2.0 iOS/Android vs React Native + native SwiftUI/Compose
