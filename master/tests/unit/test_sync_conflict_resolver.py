@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from master.sync.conflict_resolver import (
     AgentPriority,
     ConflictResolver,

@@ -12,6 +12,7 @@ The worker is a long-running asyncio task started by the FastAPI lifespan.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import Any
 
@@ -42,10 +43,8 @@ class SyncDeltaWorker:
     async def stop(self) -> None:
         if self._task and not self._task.done():
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
         log.info("sync_delta_worker.stopped")
 
     async def _run(self) -> None:

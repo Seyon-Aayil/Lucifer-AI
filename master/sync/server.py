@@ -18,7 +18,8 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import grpc
 
@@ -33,7 +34,6 @@ from master.sync.conflict_resolver import (
 )
 from master.sync.hot_subgraph import HotSubgraphBuilder
 from master.sync.lucifer_sync_pb2 import (  # type: ignore[import]
-    NodeDelta,
     PushAck,
     SubgraphResponse,
     SyncMessage,

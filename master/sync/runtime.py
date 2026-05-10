@@ -13,7 +13,6 @@ Usage in FastAPI lifespan:
 """
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import grpc
@@ -22,7 +21,9 @@ import grpc.aio
 from master.core.config import Settings
 from master.core.logging import get_logger
 from master.sync.auth import DeviceAuthInterceptor
-from master.sync.lucifer_sync_pb2_grpc import add_LuciferSyncServicer_to_server  # type: ignore[import]
+from master.sync.lucifer_sync_pb2_grpc import (
+    add_LuciferSyncServicer_to_server,  # type: ignore[import]
+)
 from master.sync.server import LuciferSyncServicer
 
 log = get_logger(__name__)
