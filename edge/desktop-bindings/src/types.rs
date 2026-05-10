@@ -15,18 +15,28 @@ pub struct ConnectArgs {
     pub jwt: String,
     #[serde(default)]
     pub sni_override: Option<String>,
+    /// Refresh token returned by `/devices/pair`. When supplied, a background
+    /// task auto-rotates the JWT before expiry. Optional for callers that
+    /// want to manage refresh themselves.
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+    /// HTTP base URL used by the refresh worker to call
+    /// `/auth/token/refresh`. Defaults to `master_endpoint` with the
+    /// `https://` scheme retained.
+    #[serde(default)]
+    pub http_master_endpoint: Option<String>,
 }
 
-impl From<ConnectArgs> for lucifer_sync_client::ClientConfig {
-    fn from(a: ConnectArgs) -> Self {
+impl From<&ConnectArgs> for lucifer_sync_client::ClientConfig {
+    fn from(a: &ConnectArgs) -> Self {
         Self {
-            master_endpoint: a.master_endpoint,
-            device_id: a.device_id,
-            client_cert: PathBuf::from(a.client_cert_path),
-            client_key: PathBuf::from(a.client_key_path),
-            ca_cert: PathBuf::from(a.ca_cert_path),
-            jwt: a.jwt,
-            sni_override: a.sni_override,
+            master_endpoint: a.master_endpoint.clone(),
+            device_id: a.device_id.clone(),
+            client_cert: PathBuf::from(&a.client_cert_path),
+            client_key: PathBuf::from(&a.client_key_path),
+            ca_cert: PathBuf::from(&a.ca_cert_path),
+            jwt: a.jwt.clone(),
+            sni_override: a.sni_override.clone(),
         }
     }
 }

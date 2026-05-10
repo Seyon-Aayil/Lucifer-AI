@@ -7,8 +7,13 @@ use std::path::{Path, PathBuf};
 use lucifer_offline_queue::ActionStatus;
 use lucifer_sync_client::SyncClient;
 
+use std::sync::Arc;
+
+use tokio::sync::Notify;
+
 use crate::{
     keychain::{self, PairingBundle, PersistedCredentials},
+    refresher::{self, RefresherSpec},
     state::{ClientHandle, EdgeStoreHandle, InferenceHandle, OfflineQueueHandle},
     types::{ConnectArgs, ConnectError, TelemetryEvent},
 };
@@ -19,9 +24,36 @@ pub async fn connect_master(handle: &ClientHandle, args: ConnectArgs) -> Result<
     if handle.is_connected().await {
         return Err(ConnectError::AlreadyConnected);
     }
-    let cfg: lucifer_sync_client::ClientConfig = args.into();
+    let cfg: lucifer_sync_client::ClientConfig = (&args).into();
     let client = SyncClient::connect(&cfg).await?;
+    let interceptor = client.auth_interceptor();
     handle.set(client).await?;
+
+    // If the caller supplied a refresh token, spawn the auto-refresh worker.
+    if let Some(refresh_token) = args.refresh_token.clone() {
+        let endpoint = args
+            .http_master_endpoint
+            .clone()
+            .unwrap_or_else(|| args.master_endpoint.clone());
+        let interceptor = interceptor;
+        let spec = RefresherSpec {
+            master_endpoint: endpoint,
+            device_id: args.device_id.clone(),
+            initial_jwt: args.jwt.clone(),
+            refresh_token,
+            on_jwt_updated: Arc::new(move |jwt| {
+                if let Err(e) = interceptor.update_token(&jwt) {
+                    tracing::warn!(error = %e, "interceptor.update_token failed");
+                }
+            }),
+        };
+        let cancel = Arc::new(Notify::new());
+        handle.set_refresher_cancel(cancel.clone()).await;
+        tokio::spawn(async move {
+            refresher::run(spec, cancel).await;
+        });
+    }
+
     Ok(())
 }
 

@@ -38,6 +38,7 @@ export function Onboarding() {
       const persisted = await ipc.persistPairingBundle({
         device_id: bundle.device_id,
         jwt: bundle.jwt,
+        refresh_token: bundle.refresh_token,
         client_cert_pem_b64: bundle.client_cert_pem_b64,
         client_key_pem_b64: bundle.client_key_pem_b64,
         ca_cert_pem_b64: bundle.ca_cert_pem_b64,
@@ -49,6 +50,8 @@ export function Onboarding() {
         clientKeyPath: persisted.client_key_path,
         caCertPath: persisted.ca_cert_path,
         jwt: bundle.jwt,
+        refreshToken: bundle.refresh_token,
+        httpMasterEndpoint: httpEndpoint,
       });
       setStep(2);
     } catch (e) {

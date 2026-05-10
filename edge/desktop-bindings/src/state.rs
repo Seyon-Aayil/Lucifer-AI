@@ -13,6 +13,7 @@ use crate::types::ConnectError;
 #[derive(Default, Clone)]
 pub struct ClientHandle {
     inner: Arc<Mutex<Option<SyncClient>>>,
+    refresher_cancel: Arc<Mutex<Option<Arc<tokio::sync::Notify>>>>,
 }
 
 impl ClientHandle {
@@ -26,7 +27,17 @@ impl ClientHandle {
     }
 
     pub async fn take(&self) -> Option<SyncClient> {
+        // Cancel any in-flight refresher first.
+        if let Some(notify) = self.refresher_cancel.lock().await.take() {
+            notify.notify_one();
+        }
         self.inner.lock().await.take()
+    }
+
+    /// Register a notify handle the next disconnect can use to stop the
+    /// background JWT refresher.
+    pub async fn set_refresher_cancel(&self, notify: Arc<tokio::sync::Notify>) {
+        *self.refresher_cancel.lock().await = Some(notify);
     }
 
     pub async fn is_connected(&self) -> bool {

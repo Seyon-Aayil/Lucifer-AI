@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import base64
 import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
+import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
@@ -33,7 +35,7 @@ from redis.asyncio import Redis
 
 from master.core.auth.cert_mint import mint_client_credentials
 from master.core.auth.device_pairing import PairingCodeStore
-from master.core.auth.jwt import create_access_token
+from master.core.auth.jwt import create_access_token, create_refresh_token
 from master.core.auth.rate_limit import FixedWindowRateLimiter
 from master.core.auth.revocation import RevocationStore
 from master.core.config import get_settings
@@ -110,6 +112,8 @@ class PairResponse(BaseModel):
     device_id: str
     jwt: str
     jwt_ttl_seconds: int
+    refresh_token: str
+    refresh_ttl_seconds: int
     client_cert_pem_b64: str
     client_key_pem_b64: str
     ca_cert_pem_b64: str
@@ -119,6 +123,11 @@ class PairResponse(BaseModel):
 
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
+
+
+def _db_dep(request: Request) -> asyncpg.Pool | None:
+    """asyncpg pool for the refresh-token insert. Optional during dev/tests."""
+    return getattr(request.app.state, "db_pool", None)
 
 
 def _redis_dep(request: Request) -> Redis:
@@ -219,6 +228,7 @@ async def pair_device(
     body: PairRequest,
     store: Annotated[PairingCodeStore, Depends(_pairing_store)],
     limiter: Annotated[FixedWindowRateLimiter, Depends(_pairing_rate_limiter)],
+    db: Annotated[asyncpg.Pool | None, Depends(_db_dep)],
 ) -> PairResponse:
     decision = await limiter.check(_client_ip(request))
     if not decision.allowed:
@@ -249,6 +259,36 @@ async def pair_device(
 
     jwt_token = create_access_token(body.device_id)
 
+    # Issue a refresh token so the edge can rotate JWTs without re-pairing.
+    raw_refresh, refresh_hash = create_refresh_token()
+    refresh_expires = datetime.now(UTC) + timedelta(seconds=settings.jwt_refresh_token_ttl_seconds)
+    if db is not None:
+        async with db.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO devices (device_id, device_type, name, app_version, os_version, last_seen_at)
+                VALUES ($1, 'desktop', $2, '0.0.0', 'unknown', NOW())
+                ON CONFLICT (device_id) DO UPDATE SET last_seen_at = NOW()
+                """,
+                body.device_id,
+                issued_for or body.device_id,
+            )
+            await conn.execute(
+                """
+                INSERT INTO refresh_tokens (device_id, token_hash, expires_at)
+                VALUES ($1, $2, $3)
+                """,
+                body.device_id,
+                refresh_hash,
+                refresh_expires,
+            )
+    else:
+        log.warning(
+            "device_pairing.refresh_token.no_db",
+            device_id=body.device_id,
+            hint="DB pool absent — refresh token returned but not persisted",
+        )
+
     log.info(
         "device_pairing.success",
         device_id=body.device_id,
@@ -260,6 +300,8 @@ async def pair_device(
         device_id=body.device_id,
         jwt=jwt_token,
         jwt_ttl_seconds=settings.jwt_access_token_ttl_seconds,
+        refresh_token=raw_refresh,
+        refresh_ttl_seconds=settings.jwt_refresh_token_ttl_seconds,
         client_cert_pem_b64=base64.b64encode(creds.client_cert_pem).decode(),
         client_key_pem_b64=base64.b64encode(creds.client_key_pem).decode(),
         ca_cert_pem_b64=base64.b64encode(creds.ca_cert_pem).decode(),

@@ -13,6 +13,10 @@ export type ConnectArgs = {
   caCertPath: string;
   jwt: string;
   sniOverride?: string | null;
+  /** Refresh token from /devices/pair. When supplied, edge auto-rotates JWT. */
+  refreshToken?: string | null;
+  /** HTTP base URL for /auth/token/refresh. Defaults to masterEndpoint. */
+  httpMasterEndpoint?: string | null;
 };
 
 export type SubgraphSummary = {
@@ -168,6 +172,7 @@ export type PendingAction = {
 export type PairingBundle = {
   device_id: string;
   jwt: string;
+  refresh_token?: string | null;
   client_cert_pem_b64: string;
   client_key_pem_b64: string;
   ca_cert_pem_b64: string;

@@ -2143,6 +2143,7 @@ dependencies = [
  "lucifer-mlx-runtime",
  "lucifer-offline-queue",
  "lucifer-sync-client",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tauri",

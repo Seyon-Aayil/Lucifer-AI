@@ -20,6 +20,10 @@ const KEYRING_SERVICE: &str = "lucifer-desktop";
 pub struct PairingBundle {
     pub device_id: String,
     pub jwt: String,
+    /// Raw refresh token. Optional for backwards compatibility with older
+    /// master builds that didn't issue one.
+    #[serde(default)]
+    pub refresh_token: Option<String>,
     pub client_cert_pem_b64: String,
     pub client_key_pem_b64: String,
     pub ca_cert_pem_b64: String,
@@ -61,13 +65,18 @@ pub fn persist_pairing_bundle(
     write_pem(&key_path, &bundle.client_key_pem_b64)?;
     write_pem(&ca_path, &bundle.ca_cert_pem_b64)?;
 
-    let jwt_in_keychain = match write_jwt(&bundle.device_id, &bundle.jwt) {
+    let jwt_in_keychain = match write_secret(&bundle.device_id, "jwt", &bundle.jwt) {
         Ok(()) => true,
         Err(e) => {
             tracing::warn!(error = %e, "keyring unavailable; jwt left in caller's memory");
             false
         }
     };
+    if let Some(refresh) = &bundle.refresh_token {
+        if let Err(e) = write_secret(&bundle.device_id, "refresh", refresh) {
+            tracing::warn!(error = %e, "keyring unavailable; refresh token not persisted");
+        }
+    }
 
     Ok(PersistedCredentials {
         device_id: bundle.device_id.clone(),
@@ -80,10 +89,37 @@ pub fn persist_pairing_bundle(
 
 /// Retrieve a JWT previously stored via `persist_pairing_bundle`.
 pub fn read_stored_jwt(device_id: &str) -> Result<Option<String>, ConnectError> {
+    read_stored_secret(device_id, "jwt")
+}
+
+/// Retrieve the refresh token previously stored via `persist_pairing_bundle`.
+pub fn read_stored_refresh_token(device_id: &str) -> Result<Option<String>, ConnectError> {
+    read_stored_secret(device_id, "refresh")
+}
+
+/// Update the JWT stored under `jwt:<device_id>` after a refresh round-trip.
+pub fn replace_stored_jwt(device_id: &str, jwt: &str) -> Result<(), ConnectError> {
     if device_id.is_empty() {
         return Err(ConnectError::Internal("device_id is empty".into()));
     }
-    let entry = keyring_entry(device_id)?;
+    write_secret(device_id, "jwt", jwt)
+        .map_err(|e| ConnectError::Internal(format!("keyring write: {e}")))
+}
+
+/// Update the refresh token stored under `refresh:<device_id>`.
+pub fn replace_stored_refresh_token(device_id: &str, refresh: &str) -> Result<(), ConnectError> {
+    if device_id.is_empty() {
+        return Err(ConnectError::Internal("device_id is empty".into()));
+    }
+    write_secret(device_id, "refresh", refresh)
+        .map_err(|e| ConnectError::Internal(format!("keyring write: {e}")))
+}
+
+fn read_stored_secret(device_id: &str, kind: &str) -> Result<Option<String>, ConnectError> {
+    if device_id.is_empty() {
+        return Err(ConnectError::Internal("device_id is empty".into()));
+    }
+    let entry = keyring_entry_for(device_id, kind)?;
     match entry.get_password() {
         Ok(s) => Ok(Some(s)),
         Err(keyring::Error::NoEntry) => Ok(None),
@@ -97,8 +133,10 @@ pub fn forget_device(app_data_dir: &Path, device_id: &str) -> Result<(), Connect
     if device_id.is_empty() {
         return Err(ConnectError::Internal("device_id is empty".into()));
     }
-    if let Ok(entry) = keyring_entry(device_id) {
-        let _ = entry.delete_credential();
+    for kind in ["jwt", "refresh"] {
+        if let Ok(entry) = keyring_entry_for(device_id, kind) {
+            let _ = entry.delete_credential();
+        }
     }
     let dir = app_data_dir.join(sanitise(device_id));
     if dir.exists() {
@@ -128,18 +166,18 @@ fn write_pem(path: &Path, b64: &str) -> Result<(), ConnectError> {
     Ok(())
 }
 
-fn write_jwt(device_id: &str, jwt: &str) -> Result<(), keyring::Error> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_user(device_id))?;
-    entry.set_password(jwt)
+fn write_secret(device_id: &str, kind: &str, value: &str) -> Result<(), keyring::Error> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_user(device_id, kind))?;
+    entry.set_password(value)
 }
 
-fn keyring_entry(device_id: &str) -> Result<keyring::Entry, ConnectError> {
-    keyring::Entry::new(KEYRING_SERVICE, &keyring_user(device_id))
+fn keyring_entry_for(device_id: &str, kind: &str) -> Result<keyring::Entry, ConnectError> {
+    keyring::Entry::new(KEYRING_SERVICE, &keyring_user(device_id, kind))
         .map_err(|e| ConnectError::Internal(format!("keyring entry: {e}")))
 }
 
-fn keyring_user(device_id: &str) -> String {
-    format!("jwt:{device_id}")
+fn keyring_user(device_id: &str, kind: &str) -> String {
+    format!("{kind}:{device_id}")
 }
 
 fn sanitise(s: &str) -> String {
@@ -168,6 +206,7 @@ mod tests {
         PairingBundle {
             device_id: device_id.into(),
             jwt: "header.payload.sig".into(),
+            refresh_token: Some("rfsh-test".into()),
             client_cert_pem_b64: b64(
                 "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n",
             ),

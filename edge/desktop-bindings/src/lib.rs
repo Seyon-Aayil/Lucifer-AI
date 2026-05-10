@@ -27,6 +27,7 @@
 
 pub mod commands;
 pub mod keychain;
+pub mod refresher;
 pub mod state;
 pub mod types;
 

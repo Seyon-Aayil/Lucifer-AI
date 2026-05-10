@@ -22,6 +22,7 @@ use crate::{
 /// declared in `lucifer_sync.proto`. Constructed via [`SyncClient::connect`].
 pub struct SyncClient {
     inner: LuciferSyncClient<InterceptedService<Channel, AuthInterceptor>>,
+    interceptor: AuthInterceptor,
 }
 
 impl SyncClient {
@@ -54,9 +55,16 @@ impl SyncClient {
 
         let channel = endpoint.connect().await?;
         let interceptor = AuthInterceptor::new(&cfg.jwt)?;
-        let inner = LuciferSyncClient::with_interceptor(channel, interceptor);
+        let inner = LuciferSyncClient::with_interceptor(channel, interceptor.clone());
 
-        Ok(Self { inner })
+        Ok(Self { inner, interceptor })
+    }
+
+    /// Cloneable handle to the channel-level auth interceptor. Used by the
+    /// JWT auto-refresh worker to swap a freshly-issued bearer token without
+    /// recreating the gRPC channel.
+    pub fn auth_interceptor(&self) -> AuthInterceptor {
+        self.interceptor.clone()
     }
 
     /// Bidirectional streaming sync. The caller drives the outbound stream;
