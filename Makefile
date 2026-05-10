@@ -1,7 +1,7 @@
 # Lucifer AI — Dev Stack Makefile
 # Usage: make <target>
 
-.PHONY: up down reset test lint typecheck migrate proto clean help
+.PHONY: up down reset test lint typecheck migrate proto clean help edge-build edge-test edge-lint
 
 # ─── Colours ────────────────────────────────────────────────────────────────
 CYAN  := \033[0;36m
@@ -107,6 +107,17 @@ test-integration: ## Run integration tests (requires up)
 test-cov: ## Run tests with coverage HTML report
 	pytest master/tests/ --cov=master --cov-report=html
 	open htmlcov/index.html
+
+# ─── Edge Client (Rust) ─────────────────────────────────────────────────────
+edge-build: ## Build the Rust edge sync client (Phase 4b)
+	cd edge && cargo build --workspace --release
+
+edge-test: ## Test the Rust edge sync client
+	cd edge && cargo test --workspace
+
+edge-lint: ## Format + clippy the Rust edge workspace
+	cd edge && cargo fmt --all -- --check
+	cd edge && cargo clippy --workspace --all-targets -- -D warnings
 
 # ─── Install ─────────────────────────────────────────────────────────────────
 install: ## Install Python deps in editable mode with dev extras
