@@ -35,13 +35,15 @@ edge/
 │       ├── queue.rs       # enqueue / claim_batch / mark_completed / mark_failed
 │       ├── types.rs       # ActionStatus + DTO
 │       └── error.rs       # typed errors
-└── ollama-sidecar/        # Local Ollama subprocess + HTTP client
-    └── src/
-        ├── lib.rs         # public API: OllamaProcess, OllamaClient
-        ├── process.rs     # spawn / wait_ready / shutdown (kill_on_drop)
-        ├── client.rs      # list / pull / generate / chat (streaming)
-        ├── types.rs       # ChatMessage / GenerateChunk / ModelInfo
-        └── error.rs       # typed errors
+├── ollama-sidecar/        # Local Ollama subprocess + HTTP client
+│   └── src/
+│       ├── lib.rs         # public API: OllamaProcess, OllamaClient
+│       ├── process.rs     # spawn / wait_ready / shutdown (kill_on_drop)
+│       ├── client.rs      # list / pull / generate / chat (streaming)
+│       ├── types.rs       # ChatMessage / GenerateChunk / ModelInfo
+│       └── error.rs       # typed errors
+└── edge-cli/              # `lucifer-edge` integration-test CLI
+    └── src/main.rs        # subcommands: ping / store-stats / enqueue / claim / ollama-*
 ```
 
 ## Build

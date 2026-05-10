@@ -1,0 +1,28 @@
+[package]
+name = "lucifer-edge-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Integration-test CLI for the Lucifer edge crates."
+
+[[bin]]
+name = "lucifer-edge"
+path = "src/main.rs"
+
+[dependencies]
+lucifer-sync-client    = { path = "../sync-client" }
+lucifer-edge-store     = { path = "../edge-store" }
+lucifer-offline-queue  = { path = "../offline-queue" }
+lucifer-ollama-sidecar = { path = "../ollama-sidecar" }
+
+clap = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
