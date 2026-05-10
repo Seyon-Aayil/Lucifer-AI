@@ -1,6 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use lucifer_edge_store::EdgeStore;
+use lucifer_mlx_runtime::Inference;
 use lucifer_offline_queue::OfflineQueue;
 use lucifer_sync_client::SyncClient;
 use tokio::sync::Mutex;
@@ -134,5 +135,32 @@ impl OfflineQueueHandle {
         })
         .await
         .map_err(|e| ConnectError::Internal(format!("join error: {e}")))?
+    }
+}
+
+/// Handle to the chosen local-inference backend (MLX or Ollama). Wraps an
+/// `Arc<dyn Inference>` selected at startup via
+/// `lucifer_mlx_runtime::select_backend`.
+#[derive(Clone)]
+pub struct InferenceHandle {
+    inner: Arc<dyn Inference>,
+    backend_label: &'static str,
+}
+
+impl InferenceHandle {
+    pub fn new(inner: Arc<dyn Inference>) -> Self {
+        let backend_label = inner.name();
+        Self {
+            inner,
+            backend_label,
+        }
+    }
+
+    pub fn backend(&self) -> &'static str {
+        self.backend_label
+    }
+
+    pub fn inference(&self) -> Arc<dyn Inference> {
+        self.inner.clone()
     }
 }

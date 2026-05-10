@@ -2109,6 +2109,7 @@ name = "lucifer-desktop"
 version = "0.1.0"
 dependencies = [
  "lucifer-desktop-bindings",
+ "lucifer-mlx-runtime",
  "lucifer-sync-client",
  "serde",
  "serde_json",
@@ -2127,6 +2128,7 @@ dependencies = [
  "async-trait",
  "futures",
  "lucifer-edge-store",
+ "lucifer-mlx-runtime",
  "lucifer-offline-queue",
  "lucifer-sync-client",
  "serde",
@@ -2169,6 +2171,20 @@ dependencies = [
  "thiserror 1.0.69",
  "tracing",
  "zerocopy 0.7.35",
+]
+
+[[package]]
+name = "lucifer-mlx-runtime"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "lucifer-ollama-sidecar",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -17,6 +17,7 @@ tauri-cmd = ["dep:tauri"]
 lucifer-sync-client = { path = "../sync-client" }
 lucifer-edge-store = { path = "../edge-store" }
 lucifer-offline-queue = { path = "../offline-queue" }
+lucifer-mlx-runtime = { path = "../mlx-runtime" }
 tauri = { workspace = true, optional = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }

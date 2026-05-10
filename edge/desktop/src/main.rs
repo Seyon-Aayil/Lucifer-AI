@@ -1,7 +1,9 @@
 // Avoid an extra console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use lucifer_desktop_bindings::{handlers, ClientHandle, EdgeStoreHandle, OfflineQueueHandle};
+use lucifer_desktop_bindings::{
+    handlers, ClientHandle, EdgeStoreHandle, InferenceHandle, OfflineQueueHandle,
+};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -28,6 +30,7 @@ fn main() {
         .manage(ClientHandle::default())
         .manage(EdgeStoreHandle::default())
         .manage(OfflineQueueHandle::default())
+        .manage(build_inference_handle())
         .invoke_handler(handlers!())
         .setup(|app| {
             register_overlay_shortcut(app.handle())?;
@@ -110,6 +113,23 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+fn build_inference_handle() -> InferenceHandle {
+    // Read OLLAMA_HOST or default to the conventional 127.0.0.1:11434.
+    let endpoint = std::env::var("OLLAMA_HOST")
+        .ok()
+        .map(|h| {
+            if h.starts_with("http") {
+                h
+            } else {
+                format!("http://{}", h)
+            }
+        })
+        .unwrap_or_else(|| "http://127.0.0.1:11434".to_string());
+    let (backend, inference) = lucifer_mlx_runtime::select_backend(&endpoint);
+    tracing::info!(?backend, endpoint, "local inference backend selected");
+    InferenceHandle::new(inference)
 }
 
 fn open_default_local_stores(app: &tauri::AppHandle) {

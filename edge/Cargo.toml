@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["sync-client", "desktop-bindings", "edge-store", "offline-queue", "ollama-sidecar", "edge-cli", "desktop"]
+members = ["sync-client", "desktop-bindings", "edge-store", "offline-queue", "ollama-sidecar", "edge-cli", "desktop", "mlx-runtime"]
 
 [workspace.package]
 version = "0.1.0"

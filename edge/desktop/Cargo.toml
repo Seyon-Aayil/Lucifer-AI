@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 lucifer-desktop-bindings = { path = "../desktop-bindings" }
 lucifer-sync-client      = { path = "../sync-client" }
+lucifer-mlx-runtime      = { path = "../mlx-runtime" }
 
 tauri = { workspace = true, features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"

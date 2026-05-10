@@ -8,7 +8,7 @@ use lucifer_offline_queue::ActionStatus;
 use lucifer_sync_client::SyncClient;
 
 use crate::{
-    state::{ClientHandle, EdgeStoreHandle, OfflineQueueHandle},
+    state::{ClientHandle, EdgeStoreHandle, InferenceHandle, OfflineQueueHandle},
     types::{ConnectArgs, ConnectError, TelemetryEvent},
 };
 
@@ -121,6 +121,112 @@ pub async fn enqueue_offline_action(
         .await
 }
 
+pub async fn list_pending_actions(
+    handle: &OfflineQueueHandle,
+    limit: usize,
+) -> Result<serde_json::Value, ConnectError> {
+    handle
+        .with_blocking(move |q| {
+            let actions = q
+                .claim_batch(limit, now_ms())
+                .map_err(|e| ConnectError::Queue(format!("claim: {e}")))?;
+            Ok(serde_json::json!(actions
+                .iter()
+                .map(|a| serde_json::json!({
+                    "id": a.id,
+                    "action_type": a.action_type,
+                    "queued_at": a.queued_at,
+                    "attempt_count": a.attempt_count,
+                    "status": match a.status {
+                        ActionStatus::Pending   => "pending",
+                        ActionStatus::InFlight  => "in_flight",
+                        ActionStatus::Completed => "completed",
+                        ActionStatus::Failed    => "failed",
+                    },
+                    "last_error": a.last_error,
+                }))
+                .collect::<Vec<_>>()))
+        })
+        .await
+}
+
+pub async fn mark_action_completed(
+    handle: &OfflineQueueHandle,
+    id: String,
+) -> Result<(), ConnectError> {
+    handle
+        .with_blocking(move |q| {
+            q.mark_completed(&id)
+                .map_err(|e| ConnectError::Queue(format!("mark_completed: {e}")))
+        })
+        .await
+}
+
+pub async fn mark_action_failed(
+    handle: &OfflineQueueHandle,
+    id: String,
+    error: String,
+) -> Result<String, ConnectError> {
+    handle
+        .with_blocking(move |q| {
+            let next = q
+                .mark_failed(&id, &error)
+                .map_err(|e| ConnectError::Queue(format!("mark_failed: {e}")))?;
+            Ok(match next {
+                ActionStatus::Pending => "pending",
+                ActionStatus::InFlight => "in_flight",
+                ActionStatus::Completed => "completed",
+                ActionStatus::Failed => "failed",
+            }
+            .to_string())
+        })
+        .await
+}
+
+// ── Edge store queries ───────────────────────────────────────────────────────
+
+pub async fn list_nodes_by_type(
+    handle: &EdgeStoreHandle,
+    node_type: String,
+    limit: usize,
+) -> Result<serde_json::Value, ConnectError> {
+    handle
+        .with_blocking(move |store| {
+            let rows = store
+                .list_by_type(&node_type, limit)
+                .map_err(|e| ConnectError::Store(format!("list_by_type: {e}")))?;
+            Ok(serde_json::json!(rows
+                .iter()
+                .map(|n| serde_json::json!({
+                    "node_id": n.node_id,
+                    "node_type": n.node_type,
+                    "classification": n.classification,
+                    "payload": n.payload,
+                    "updated_at": n.updated_at,
+                    "source_agent": n.source_agent,
+                }))
+                .collect::<Vec<_>>()))
+        })
+        .await
+}
+
+// ── Local inference (MLX / Ollama) ───────────────────────────────────────────
+
+pub async fn local_backend(handle: &InferenceHandle) -> &'static str {
+    handle.backend()
+}
+
+pub async fn local_generate(
+    handle: &InferenceHandle,
+    model: String,
+    prompt: String,
+) -> Result<String, ConnectError> {
+    let inf = handle.inference();
+    inf.generate(&model, &prompt)
+        .await
+        .map_err(|e| ConnectError::Internal(format!("inference: {e}")))
+}
+
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -228,6 +334,54 @@ pub mod __handlers {
         super::enqueue_offline_action(handle.inner(), action_type, payload).await
     }
 
+    #[tauri::command]
+    pub async fn list_pending_actions(
+        handle: State<'_, OfflineQueueHandle>,
+        limit: usize,
+    ) -> Result<serde_json::Value, ConnectError> {
+        super::list_pending_actions(handle.inner(), limit).await
+    }
+
+    #[tauri::command]
+    pub async fn mark_action_completed(
+        handle: State<'_, OfflineQueueHandle>,
+        id: String,
+    ) -> Result<(), ConnectError> {
+        super::mark_action_completed(handle.inner(), id).await
+    }
+
+    #[tauri::command]
+    pub async fn mark_action_failed(
+        handle: State<'_, OfflineQueueHandle>,
+        id: String,
+        error: String,
+    ) -> Result<String, ConnectError> {
+        super::mark_action_failed(handle.inner(), id, error).await
+    }
+
+    #[tauri::command]
+    pub async fn list_nodes_by_type(
+        handle: State<'_, EdgeStoreHandle>,
+        node_type: String,
+        limit: usize,
+    ) -> Result<serde_json::Value, ConnectError> {
+        super::list_nodes_by_type(handle.inner(), node_type, limit).await
+    }
+
+    #[tauri::command]
+    pub async fn local_backend(handle: State<'_, InferenceHandle>) -> Result<String, ConnectError> {
+        Ok(super::local_backend(handle.inner()).await.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn local_generate(
+        handle: State<'_, InferenceHandle>,
+        model: String,
+        prompt: String,
+    ) -> Result<String, ConnectError> {
+        super::local_generate(handle.inner(), model, prompt).await
+    }
+
     // Tauri's `generate_handler!` cannot be wrapped in a generic-returning fn
     // because the resulting type closes over `Builder`'s runtime parameter. The
     // recommended pattern is to call the macro directly at the call-site, e.g.
@@ -250,6 +404,12 @@ pub mod __handlers {
                 $crate::commands::__handlers::open_offline_queue,
                 $crate::commands::__handlers::offline_queue_stats,
                 $crate::commands::__handlers::enqueue_offline_action,
+                $crate::commands::__handlers::list_pending_actions,
+                $crate::commands::__handlers::mark_action_completed,
+                $crate::commands::__handlers::mark_action_failed,
+                $crate::commands::__handlers::list_nodes_by_type,
+                $crate::commands::__handlers::local_backend,
+                $crate::commands::__handlers::local_generate,
             ]
         };
     }

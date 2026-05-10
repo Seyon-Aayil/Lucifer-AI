@@ -58,6 +58,12 @@ function mockResponse<T>(cmd: string): T {
       return { node_count: 0, edge_count: 0, last_sync_at_ms: null } as unknown as T;
     case "offline_queue_stats":
       return { pending: 0, in_flight: 0, completed: 0, failed: 0 } as unknown as T;
+    case "list_pending_actions":
+      return [] as unknown as T;
+    case "list_nodes_by_type":
+      return [] as unknown as T;
+    case "local_backend":
+      return "ollama" as unknown as T;
     default:
       return undefined as unknown as T;
   }
@@ -90,5 +96,37 @@ export const ipc = {
   enqueueOfflineAction: (actionType: string, payload: string) =>
     invoke<string>("enqueue_offline_action", { actionType, payload }),
 
+  listPendingActions: (limit: number) =>
+    invoke<PendingAction[]>("list_pending_actions", { limit }),
+  markActionCompleted: (id: string) =>
+    invoke<void>("mark_action_completed", { id }),
+  markActionFailed: (id: string, error: string) =>
+    invoke<string>("mark_action_failed", { id, error }),
+
+  listNodesByType: (nodeType: string, limit: number) =>
+    invoke<EdgeNode[]>("list_nodes_by_type", { nodeType, limit }),
+
+  localBackend: () => invoke<string>("local_backend"),
+  localGenerate: (model: string, prompt: string) =>
+    invoke<string>("local_generate", { model, prompt }),
+
   inTauri,
+};
+
+export type PendingAction = {
+  id: string;
+  action_type: string;
+  queued_at: number;
+  attempt_count: number;
+  status: "pending" | "in_flight" | "completed" | "failed";
+  last_error: string | null;
+};
+
+export type EdgeNode = {
+  node_id: string;
+  node_type: string;
+  classification: string;
+  payload: number[]; // bytes
+  updated_at: number;
+  source_agent: string;
 };

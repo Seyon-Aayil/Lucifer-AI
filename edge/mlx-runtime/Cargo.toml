@@ -1,0 +1,28 @@
+[package]
+name = "lucifer-mlx-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Apple-Silicon MLX inference backend for the Lucifer edge clients with an Ollama fallback for non-Apple-Silicon hosts."
+
+[features]
+# `mlx` enables a real MLX implementation (link against the C++ runtime).
+# Off by default until the upstream `mlx-rs` build deps are vendored; the
+# crate still compiles and routes through the Ollama fallback.
+default = []
+mlx = []
+
+[dependencies]
+lucifer-ollama-sidecar = { path = "../ollama-sidecar" }
+async-trait = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }

@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import { ipc, EdgeNode } from "../lib/ipc";
+
 const NODE_TYPES = [
   { label: "Person", color: "#7C5CFF" },
   { label: "Place", color: "#22D3EE" },
@@ -7,22 +10,58 @@ const NODE_TYPES = [
   { label: "News", color: "#60A5FA" },
 ];
 
+function decodePayload(bytes: number[]): unknown {
+  try {
+    const text = new TextDecoder().decode(new Uint8Array(bytes));
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function classificationPill(c: string): string {
+  return c === "secret"
+    ? "pill-secret"
+    : c === "restricted"
+    ? "pill-restricted"
+    : c === "public"
+    ? "pill-public"
+    : "pill-standard";
+}
+
 export function KnowledgeGraph() {
+  const [type, setType] = useState("Person");
+  const [nodes, setNodes] = useState<EdgeNode[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh(t: string) {
+    setError(null);
+    try {
+      const rows = await ipc.listNodesByType(t, 50);
+      setNodes(rows);
+      setSelected(rows[0]?.node_id ?? null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  useEffect(() => {
+    refresh(type);
+  }, [type]);
+
+  const sel = nodes.find((n) => n.node_id === selected);
+  const payload = sel ? decodePayload(sel.payload) : null;
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-surface flex-wrap">
-        <input className="input flex-1 min-w-[240px]" placeholder="semantic + label search…" />
-        <div className="flex items-center gap-1">
-          <button className="btn btn-ghost !py-1 !px-2.5 text-xs">Graph</button>
-          <button className="btn btn-ghost !py-1 !px-2.5 text-xs">Table</button>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-1.5 px-4 py-2 border-b border-border overflow-x-auto bg-surface">
+        <span className="text-xs text-text-2 mr-2">Type</span>
         {NODE_TYPES.map((t) => (
-          <span
+          <button
             key={t.label}
-            className="pill text-xs font-mono"
+            onClick={() => setType(t.label)}
+            className={`pill text-xs font-mono ${type === t.label ? "" : "opacity-60"}`}
             style={{
               background: `${t.color}20`,
               color: t.color,
@@ -30,81 +69,85 @@ export function KnowledgeGraph() {
             }}
           >
             {t.label}
-          </span>
+          </button>
         ))}
-        <div className="w-px h-4 bg-border mx-2" />
-        <span className="pill pill-public">public</span>
-        <span className="pill pill-standard">standard</span>
-        <span className="pill pill-restricted">restricted ⌫</span>
-        <span className="pill pill-secret">secret 🔒</span>
+        <span className="ml-auto text-[11px] text-text-3 font-mono">{nodes.length} rows</span>
       </div>
 
       <div className="flex-1 grid grid-cols-[2fr_1fr] gap-px bg-border min-h-0">
-        <div className="bg-bg flex items-center justify-center text-text-3 text-sm">
-          <svg width="100%" height="100%" viewBox="0 0 600 400" className="max-w-full max-h-full">
-            {[
-              { x: 200, y: 200, c: "#7C5CFF" },
-              { x: 320, y: 140, c: "#22D3EE" },
-              { x: 440, y: 220, c: "#4ADE80" },
-              { x: 380, y: 320, c: "#F472B6" },
-              { x: 160, y: 100, c: "#FBBF24" },
-              { x: 120, y: 300, c: "#F87171" },
-            ].map((n, i) => (
-              <g key={i}>
-                <circle cx={n.x} cy={n.y} r={n.c === "#F87171" ? 24 : 18}
-                        fill={n.c} fillOpacity={n.c === "#F87171" ? 0.25 : 0.18}
-                        stroke={n.c} strokeWidth={n.c === "#F87171" ? 2 : 1} />
-                {n.c === "#F87171" ? (
-                  <circle cx={n.x} cy={n.y} r={32} fill="none" stroke={n.c} strokeWidth={1} strokeDasharray="3 3" opacity={0.6}/>
-                ) : null}
-              </g>
-            ))}
-          </svg>
+        <div className="bg-bg overflow-auto">
+          {nodes.length === 0 ? (
+            <div className="p-6 text-text-3 text-sm">
+              No <span className="font-mono">{type}</span> nodes in the local mirror yet. Pull
+              the hot subgraph from the connection bar to seed it.
+            </div>
+          ) : (
+            <table className="w-full text-xs">
+              <thead className="text-text-3 text-left">
+                <tr>
+                  <th className="px-3 py-2">id</th>
+                  <th className="px-3 py-2">classification</th>
+                  <th className="px-3 py-2">source</th>
+                  <th className="px-3 py-2">updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nodes.map((n) => (
+                  <tr
+                    key={n.node_id}
+                    className={`border-t border-border cursor-pointer hover:bg-surface ${
+                      selected === n.node_id ? "bg-surface" : ""
+                    }`}
+                    onClick={() => setSelected(n.node_id)}
+                  >
+                    <td className="px-3 py-1.5 font-mono text-text">{n.node_id}</td>
+                    <td className="px-3 py-1.5">
+                      <span className={`pill ${classificationPill(n.classification)}`}>
+                        {n.classification}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5 font-mono text-text-2">{n.source_agent}</td>
+                    <td className="px-3 py-1.5 font-mono text-text-3">
+                      {new Date(n.updated_at).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <div className="bg-surface px-4 py-4 overflow-auto">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="font-medium">Alex Chen</span>
-            <span className="pill pill-restricted ml-auto">restricted 🔒</span>
-          </div>
-          <div className="text-[11px] text-text-3 mb-3">never sent to cloud LLMs</div>
-
-          <div className="text-xs text-text-2 mb-1">Attributes</div>
-          <pre className="font-mono text-[11px] bg-surface-elev rounded p-2 mb-3">
-{`{
-  "name": "Alex Chen",
-  "role": "Lead Architect",
-  "team": "Core Systems"
-}`}
-          </pre>
-
-          <div className="text-xs text-text-2 mb-1">Edges</div>
-          <ul className="text-[11px] text-text-3 font-mono mb-3 space-y-0.5">
-            <li>WORKS_WITH → Person:Sam (0.84)</li>
-            <li>AUTHORED → Artifact:RFC-014 (1.0)</li>
-            <li>MEMBER_OF → Concept:Platform (0.7)</li>
-          </ul>
-
-          <div className="text-xs text-text-2 mb-1">Decay history</div>
-          <svg viewBox="0 0 100 24" className="w-full h-8 mb-4">
-            <polyline
-              fill="none"
-              stroke="#7C5CFF"
-              strokeWidth="1.5"
-              points="0,4 14,5 28,7 42,10 56,13 70,17 84,20 98,22"
-            />
-          </svg>
-
-          <div className="flex gap-2">
-            <button className="btn btn-danger">Soft delete</button>
-            <button className="btn btn-primary">Promote</button>
-          </div>
+          {sel ? (
+            <>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="font-mono">{sel.node_id}</span>
+                <span className={`pill ${classificationPill(sel.classification)} ml-auto`}>
+                  {sel.classification}
+                </span>
+              </div>
+              <div className="text-xs text-text-2 mb-1">Payload</div>
+              <pre className="font-mono text-[11px] bg-surface-elev rounded p-2 mb-3 overflow-auto">
+                {payload ? JSON.stringify(payload, null, 2) : "(could not decode)"}
+              </pre>
+              <div className="text-xs text-text-2 mb-1">Updated</div>
+              <div className="font-mono text-[11px] mb-3">
+                {new Date(sel.updated_at).toISOString()}
+              </div>
+              <div className="text-xs text-text-2 mb-1">Source agent</div>
+              <div className="font-mono text-[11px] mb-3">{sel.source_agent || "—"}</div>
+            </>
+          ) : (
+            <div className="text-text-3 text-sm">Select a node to see its payload.</div>
+          )}
         </div>
       </div>
 
-      <div className="px-4 py-2 text-[11px] text-text-3 border-t border-border bg-surface">
-        Showing 312 of 1,847 nodes · 64 ACL-filtered
-      </div>
+      {error ? (
+        <div className="px-4 py-2 text-[11px] text-danger border-t border-border bg-danger/10">
+          {error}
+        </div>
+      ) : null}
     </div>
   );
 }
