@@ -121,6 +121,12 @@ class Settings(BaseSettings):
     grpc_tls_cert_path: str | None = None
     grpc_tls_key_path: str | None = None
     grpc_tls_client_ca_path: str | None = None
+    # Path to the CA private key used to mint per-device client certs during
+    # the pairing flow. Defaults to the dev CA produced by `make dev-certs`.
+    pairing_ca_cert_path: str = "infra/certs/ca.crt"
+    pairing_ca_key_path: str = "infra/certs/ca.key"
+    pairing_code_ttl_seconds: int = 60
+    pairing_cert_validity_days: int = 365
     grpc_sync_enabled: bool = True
     sync_max_subgraph_bytes: int = 50 * 1024 * 1024  # 50 MiB
     sync_max_offline_actions: int = 10_000

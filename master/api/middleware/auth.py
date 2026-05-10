@@ -38,6 +38,8 @@ EXEMPT_PATHS: frozenset[str] = frozenset(
         "/redoc",
         "/auth/device/register",
         "/auth/token/refresh",
+        "/devices/pair",
+        "/devices/admin/code",
     }
 )
 

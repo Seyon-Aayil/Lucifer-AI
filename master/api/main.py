@@ -22,7 +22,7 @@ from redis.asyncio import Redis
 from master.agents.librarian.decay_scheduler import DecayScheduler
 from master.agents.librarian.graph_client import GraphClient
 from master.api.middleware.auth import AuthMiddleware
-from master.api.routers import auth, chat, health
+from master.api.routers import auth, chat, devices, health
 from master.core.auth.revocation import RevocationStore
 from master.core.config import get_settings
 from master.core.logging import get_logger, setup_logging
@@ -194,6 +194,7 @@ def create_app() -> FastAPI:
     # ── Routers ─────────────────────────────────────────────────────────────
     app.include_router(health.router, prefix="/health", tags=["health"])
     app.include_router(auth.router, prefix="/auth", tags=["auth"])
+    app.include_router(devices.router, tags=["devices"])
     app.include_router(chat.router, prefix="/v1", tags=["chat"])
 
     # ── OpenTelemetry Auto-instrumentation ──────────────────────────────────

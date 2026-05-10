@@ -20,16 +20,34 @@ export function Onboarding() {
     setError(null);
     setBusy(true);
     try {
-      // Placeholder: real flow exchanges the 6-digit code for a JWT + cert
-      // material against the master web admin. For now we just call connect
-      // with whatever the user provides.
+      // Exchange the 6-digit code for JWT + cert material against the master.
+      // The master web admin endpoint is at <endpoint>/devices/pair.
+      const codeStr = code.join("");
+      const httpEndpoint = endpoint.replace(/^grpc/, "http");
+      const res = await fetch(`${httpEndpoint}/devices/pair`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: codeStr, device_id: "device-mac-01" }),
+      });
+      if (!res.ok) {
+        const detail = await res.text();
+        throw new Error(`pairing failed (${res.status}): ${detail}`);
+      }
+      const bundle = await res.json();
+      // The cert + key material would be persisted into the OS keychain by
+      // the Tauri shell here. For now we surface the bundle to the user and
+      // store the JWT on the connection state.
+      console.log("paired", { device_id: bundle.device_id, cn: bundle.common_name });
       await ipc.connectMaster({
         masterEndpoint: endpoint,
-        deviceId: "device-mac-01",
+        deviceId: bundle.device_id,
+        // TODO: Tauri-side helper that decodes the b64 PEMs and writes them
+        // into the macOS Keychain, returning paths. Until that lands the
+        // user pastes them in via the dev surface.
         clientCertPath: "",
         clientKeyPath: "",
         caCertPath: "",
-        jwt: "<exchange-pending>",
+        jwt: bundle.jwt,
       });
       setStep(2);
     } catch (e) {
