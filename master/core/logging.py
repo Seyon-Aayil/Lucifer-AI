@@ -5,6 +5,7 @@ Structured logging setup using structlog.
 Configured once at application startup via setup_logging().
 All log records include: timestamp, level, service, trace_id (if in OTel context).
 """
+
 from __future__ import annotations
 
 import logging

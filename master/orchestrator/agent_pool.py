@@ -11,6 +11,7 @@ Usage:
     pool = AgentPool.build_default()
     agent = pool.resolve("personal-agent", llm_registry=..., ...)
 """
+
 from __future__ import annotations
 
 import importlib
@@ -25,11 +26,11 @@ tracer = get_tracer(__name__)
 
 # (module_path, class_name) for every specialist agent
 _AGENT_MODULES: list[tuple[str, str]] = [
-    ("master.agents.personal.agent",   "PersonalAgent"),
-    ("master.agents.coding.agent",     "CodingAgent"),
-    ("master.agents.financial.agent",  "FinancialAgent"),
-    ("master.agents.health.agent",     "HealthAgent"),
-    ("master.agents.research.agent",   "ResearchAgent"),
+    ("master.agents.personal.agent", "PersonalAgent"),
+    ("master.agents.coding.agent", "CodingAgent"),
+    ("master.agents.financial.agent", "FinancialAgent"),
+    ("master.agents.health.agent", "HealthAgent"),
+    ("master.agents.research.agent", "ResearchAgent"),
 ]
 
 _FALLBACK_AGENT_ID = "personal-agent"
@@ -54,9 +55,7 @@ class AgentPool:
     def register(self, agent_class: type[BaseAgent]) -> None:
         """Register an agent class using its AGENT_ID class variable."""
         if not agent_class.AGENT_ID:
-            raise ValueError(
-                f"Agent class {agent_class.__name__} must define a non-empty AGENT_ID"
-            )
+            raise ValueError(f"Agent class {agent_class.__name__} must define a non-empty AGENT_ID")
         self._classes[agent_class.AGENT_ID] = agent_class
         log.info("agent_pool.registered", agent_id=agent_class.AGENT_ID)
 
@@ -129,6 +128,7 @@ class AgentPool:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _try_register(pool: AgentPool, module_path: str, class_name: str) -> None:
     """Import module_path and register class_name; silently skip on failure."""

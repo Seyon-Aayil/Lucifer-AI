@@ -42,12 +42,45 @@ migrate-new: ## Create a new Alembic migration (usage: make migrate-new MSG="des
 # ─── Code Generation ────────────────────────────────────────────────────────
 proto: ## Generate gRPC stubs from proto files
 	@echo "$(CYAN)Generating gRPC Python stubs...$(RESET)"
+	@mkdir -p master/sync
+	@touch master/sync/__init__.py
 	python -m grpc_tools.protoc \
 		-I infra/proto \
 		--python_out=master/sync \
 		--grpc_python_out=master/sync \
 		infra/proto/lucifer_sync.proto
+	@# Rewrite the absolute import in the generated _grpc.py to a package-relative one
+	@sed -i.bak -E 's/^import (lucifer_sync_pb2) as (.*)$$/from . import \1 as \2/' \
+		master/sync/lucifer_sync_pb2_grpc.py
+	@rm -f master/sync/lucifer_sync_pb2_grpc.py.bak
 	@echo "$(CYAN)Stubs generated in master/sync/$(RESET)"
+
+proto-check: ## Verify generated proto stubs are up to date (CI)
+	@echo "$(CYAN)Checking proto stubs are current...$(RESET)"
+	@$(MAKE) proto >/dev/null
+	@if ! git diff --quiet -- master/sync/lucifer_sync_pb2.py master/sync/lucifer_sync_pb2_grpc.py; then \
+		echo "ERROR: Generated proto stubs are out of date. Run 'make proto' and commit." >&2; \
+		git --no-pager diff -- master/sync/lucifer_sync_pb2.py master/sync/lucifer_sync_pb2_grpc.py >&2; \
+		exit 1; \
+	fi
+	@echo "$(CYAN)Proto stubs current.$(RESET)"
+
+dev-certs: ## Mint local CA + server + client certs for gRPC mTLS dev (infra/certs/)
+	@echo "$(CYAN)Generating dev mTLS certificates in infra/certs/...$(RESET)"
+	@mkdir -p infra/certs
+	@cd infra/certs && \
+		openssl genrsa -out ca.key 4096 >/dev/null 2>&1 && \
+		openssl req -new -x509 -days 365 -key ca.key -out ca.crt -subj "/CN=lucifer-dev-ca" >/dev/null 2>&1 && \
+		openssl genrsa -out server.key 4096 >/dev/null 2>&1 && \
+		openssl req -new -key server.key -out server.csr -subj "/CN=localhost" >/dev/null 2>&1 && \
+		openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+			-out server.crt -days 365 -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1") >/dev/null 2>&1 && \
+		openssl genrsa -out client.key 4096 >/dev/null 2>&1 && \
+		openssl req -new -key client.key -out client.csr -subj "/CN=lucifer-dev-client" >/dev/null 2>&1 && \
+		openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+			-out client.crt -days 365 >/dev/null 2>&1 && \
+		rm -f *.csr *.srl
+	@echo "$(CYAN)Dev certs ready: infra/certs/{ca,server,client}.{crt,key}$(RESET)"
 
 # ─── Code Quality ───────────────────────────────────────────────────────────
 lint: ## Run Ruff linter + formatter check

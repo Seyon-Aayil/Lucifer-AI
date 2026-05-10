@@ -4,6 +4,7 @@ master.api.routers.health
 Health check endpoints. Reports status of all service dependencies.
 Used by: Docker Compose healthchecks, Kubernetes probes, Grafana.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -115,9 +116,7 @@ async def readiness(request: Request) -> dict[str, Any]:
         "nats": nats_status,
     }
 
-    overall = all(
-        isinstance(s, dict) and s.get("status") == "ok" for s in services.values()
-    )
+    overall = all(isinstance(s, dict) and s.get("status") == "ok" for s in services.values())
 
     return {
         "status": "ok" if overall else "degraded",

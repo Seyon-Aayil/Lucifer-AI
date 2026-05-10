@@ -11,6 +11,7 @@ Mem0 REST API (self-hosted, http://localhost:8090 by default):
 All operations are fire-and-forget safe: errors are logged but not raised
 so a Mem0 outage never kills the orchestration pipeline.
 """
+
 from __future__ import annotations
 
 from typing import Any

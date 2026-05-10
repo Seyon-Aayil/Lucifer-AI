@@ -12,6 +12,7 @@ Nodes whose decayScore falls below DELETE_THRESHOLD are soft-deleted
 Runs nightly at 02:00 via AsyncIOScheduler.
 Can also be triggered on-demand via run_decay_cycle() for testing.
 """
+
 from __future__ import annotations
 
 import math
@@ -121,9 +122,7 @@ class DecayScheduler:
                     await self._gc.soft_delete_node(node_id)
                     stats["soft_deleted"] += 1
                 except Exception as exc:
-                    log.warning(
-                        "decay_scheduler.soft_delete_failed", node=node_id, error=str(exc)
-                    )
+                    log.warning("decay_scheduler.soft_delete_failed", node=node_id, error=str(exc))
                     stats["errors"] += 1
 
             log.info("decay_scheduler.cycle.complete", **stats)
@@ -147,6 +146,7 @@ class DecayScheduler:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _parse_dt(value: Any) -> datetime | None:
     """Parse a Neo4j DateTime or ISO string into a timezone-aware datetime."""

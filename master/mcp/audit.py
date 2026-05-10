@@ -5,6 +5,7 @@ HMAC-chained audit log for all MCP tool calls and agent executions.
 Every record appends to an immutable chain stored in Postgres `audit_log`.
 Chain integrity can be verified offline via `audit_verifier.py` (Phase 6).
 """
+
 from __future__ import annotations
 
 import json

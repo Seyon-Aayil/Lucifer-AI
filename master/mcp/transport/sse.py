@@ -4,6 +4,7 @@ master.mcp.transport.sse
 Streamable HTTP/SSE MCP transport for remote integrations (Gmail, Notion, GitHub, Slack).
 Connects to Dockerized MCP servers via HTTP POST with streaming response support.
 """
+
 from __future__ import annotations
 
 from typing import Any

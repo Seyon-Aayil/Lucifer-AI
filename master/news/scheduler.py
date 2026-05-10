@@ -11,6 +11,7 @@ Usage in FastAPI lifespan:
     news_scheduler = await NewsScheduler.create(graph_client)
     news_scheduler.attach(scheduler)       # existing AsyncIOScheduler
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -30,16 +31,28 @@ log = get_logger(__name__)
 
 _DEFAULT_SOURCES: list[NewsSource] = [
     # Tech news
-    NewsSource("hn-top",     "rss",    "https://hnrss.org/frontpage",                    cadence_minutes=60),
-    NewsSource("hn-ask",     "rss",    "https://hnrss.org/ask",                          cadence_minutes=120),
+    NewsSource("hn-top", "rss", "https://hnrss.org/frontpage", cadence_minutes=60),
+    NewsSource("hn-ask", "rss", "https://hnrss.org/ask", cadence_minutes=120),
     # AI / ML
-    NewsSource("arxiv-cs-ai","arxiv",  "https://rss.arxiv.org/rss/cs.AI",               cadence_minutes=240),
-    NewsSource("arxiv-cs-lg","arxiv",  "https://rss.arxiv.org/rss/cs.LG",               cadence_minutes=240),
+    NewsSource("arxiv-cs-ai", "arxiv", "https://rss.arxiv.org/rss/cs.AI", cadence_minutes=240),
+    NewsSource("arxiv-cs-lg", "arxiv", "https://rss.arxiv.org/rss/cs.LG", cadence_minutes=240),
     # Open source
-    NewsSource("github-trending", "rss","https://github.com/trending?since=daily.atom", cadence_minutes=360),
+    NewsSource(
+        "github-trending",
+        "rss",
+        "https://github.com/trending?since=daily.atom",
+        cadence_minutes=360,
+    ),
     # Developer
-    NewsSource("r-programming", "reddit","https://www.reddit.com/r/programming/",        cadence_minutes=120),
-    NewsSource("r-machinelearning","reddit","https://www.reddit.com/r/MachineLearning/", cadence_minutes=120),
+    NewsSource(
+        "r-programming", "reddit", "https://www.reddit.com/r/programming/", cadence_minutes=120
+    ),
+    NewsSource(
+        "r-machinelearning",
+        "reddit",
+        "https://www.reddit.com/r/MachineLearning/",
+        cadence_minutes=120,
+    ),
 ]
 
 

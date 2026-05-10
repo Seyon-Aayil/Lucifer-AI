@@ -3,6 +3,7 @@ master.token_optimizer.types
 ==============================
 Shared data types for the token optimization pipeline.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -18,6 +19,7 @@ def estimate_tokens(text: str) -> int:
 @dataclass
 class ContextChunk:
     """A single chunk of context with relevance metadata."""
+
     text: str
     source: str = ""
     relevance_score: float = 1.0
@@ -35,6 +37,7 @@ class ContextChunk:
 @dataclass
 class PreparedContext:
     """Result of TokenOptimizer.prepare() — ready for LLM dispatch."""
+
     chunks: list[ContextChunk]
     cache_hit: bool = False
     cached_response: str | None = None

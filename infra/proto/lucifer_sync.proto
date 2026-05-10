@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package lucifer.sync.v1;
 
-option python_package = "master.sync";
-
 // ============================================================
 // LuciferSync — bidirectional sync protocol between master
 // and edge devices (desktop / mobile / watch relay).

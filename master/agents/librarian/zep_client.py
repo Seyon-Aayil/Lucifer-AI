@@ -14,6 +14,7 @@ temporal facts and entity relationships from the episode stream.
 
 All operations degrade gracefully: errors are logged but never raised.
 """
+
 from __future__ import annotations
 
 from typing import Any

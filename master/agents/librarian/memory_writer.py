@@ -12,6 +12,7 @@ Each store write is fire-and-forget: a failure in one store is logged but
 does not prevent writes to the other stores. This keeps memory writes
 non-blocking on the critical response path.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -120,6 +121,7 @@ class MemoryWriter:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _delta_to_text(delta: MemoryDelta) -> str:
     """
