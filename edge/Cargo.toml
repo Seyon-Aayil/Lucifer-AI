@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["sync-client", "desktop-bindings", "edge-store"]
+members = ["sync-client", "desktop-bindings", "edge-store", "offline-queue"]
 
 [workspace.package]
 version = "0.1.0"
@@ -29,6 +29,7 @@ async-trait = "0.1"
 rusqlite = { version = "0.32", features = ["bundled", "blob", "load_extension"] }
 sqlite-vec = "0.1"
 zerocopy = { version = "0.7", features = ["derive"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 
 [profile.release]
 lto = "thin"

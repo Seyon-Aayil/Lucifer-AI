@@ -23,11 +23,17 @@ edge/
 │       ├── commands.rs    # connect_master / disconnect / get_hot_subgraph / …
 │       ├── state.rs       # tokio::Mutex-protected SyncClient handle
 │       └── types.rs       # JS-friendly DTOs + serializable error
-└── edge-store/            # SQLite + sqlite-vec edge KG mirror
+├── edge-store/            # SQLite + sqlite-vec edge KG mirror
+│   └── src/
+│       ├── lib.rs         # public API: EdgeStore, NodeDelta, EdgeDelta
+│       ├── store.rs       # EdgeStore: open, apply_manifest, vector_search
+│       ├── manifest.rs    # JSON-friendly hot-subgraph DTOs
+│       └── error.rs       # typed errors
+└── offline-queue/         # SQLite WAL-backed action queue + replay
     └── src/
-        ├── lib.rs         # public API: EdgeStore, NodeDelta, EdgeDelta
-        ├── store.rs       # EdgeStore: open, apply_manifest, vector_search
-        ├── manifest.rs    # JSON-friendly hot-subgraph DTOs
+        ├── lib.rs         # public API: OfflineQueue, QueuedAction, MAX_ACTIONS
+        ├── queue.rs       # enqueue / claim_batch / mark_completed / mark_failed
+        ├── types.rs       # ActionStatus + DTO
         └── error.rs       # typed errors
 ```
 
