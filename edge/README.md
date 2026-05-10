@@ -17,12 +17,18 @@ edge/
 │       ├── config.rs      # connection settings + validation
 │       ├── error.rs       # typed errors
 │       └── transport.rs   # mTLS channel + RPC helpers
-└── desktop-bindings/      # Tauri 2.0 IPC commands wrapping sync-client
+├── desktop-bindings/      # Tauri 2.0 IPC commands wrapping sync-client
+│   └── src/
+│       ├── lib.rs         # public API: ClientHandle, ConnectArgs, handlers!()
+│       ├── commands.rs    # connect_master / disconnect / get_hot_subgraph / …
+│       ├── state.rs       # tokio::Mutex-protected SyncClient handle
+│       └── types.rs       # JS-friendly DTOs + serializable error
+└── edge-store/            # SQLite + sqlite-vec edge KG mirror
     └── src/
-        ├── lib.rs         # public API: ClientHandle, ConnectArgs, handlers!()
-        ├── commands.rs    # connect_master / disconnect / get_hot_subgraph / …
-        ├── state.rs       # tokio::Mutex-protected SyncClient handle
-        └── types.rs       # JS-friendly DTOs + serializable error
+        ├── lib.rs         # public API: EdgeStore, NodeDelta, EdgeDelta
+        ├── store.rs       # EdgeStore: open, apply_manifest, vector_search
+        ├── manifest.rs    # JSON-friendly hot-subgraph DTOs
+        └── error.rs       # typed errors
 ```
 
 ## Build

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["sync-client", "desktop-bindings"]
+members = ["sync-client", "desktop-bindings", "edge-store"]
 
 [workspace.package]
 version = "0.1.0"
@@ -26,6 +26,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tauri = { version = "2", features = ["macos-private-api"] }
 tauri-build = { version = "2", features = [] }
 async-trait = "0.1"
+rusqlite = { version = "0.32", features = ["bundled", "blob", "load_extension"] }
+sqlite-vec = "0.1"
+zerocopy = { version = "0.7", features = ["derive"] }
 
 [profile.release]
 lto = "thin"
