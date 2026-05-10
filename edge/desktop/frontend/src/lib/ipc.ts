@@ -106,6 +106,13 @@ export const ipc = {
   listNodesByType: (nodeType: string, limit: number) =>
     invoke<EdgeNode[]>("list_nodes_by_type", { nodeType, limit }),
 
+  persistPairingBundle: (bundle: PairingBundle) =>
+    invoke<PersistedCredentials>("persist_pairing_bundle", { bundle }),
+  readStoredJwt: (deviceId: string) =>
+    invoke<string | null>("read_stored_jwt", { deviceId }),
+  forgetDevice: (deviceId: string) =>
+    invoke<void>("forget_device", { deviceId }),
+
   localBackend: () => invoke<string>("local_backend"),
   localGenerate: (model: string, prompt: string) =>
     invoke<string>("local_generate", { model, prompt }),
@@ -156,6 +163,22 @@ export type PendingAction = {
   attempt_count: number;
   status: "pending" | "in_flight" | "completed" | "failed";
   last_error: string | null;
+};
+
+export type PairingBundle = {
+  device_id: string;
+  jwt: string;
+  client_cert_pem_b64: string;
+  client_key_pem_b64: string;
+  ca_cert_pem_b64: string;
+};
+
+export type PersistedCredentials = {
+  device_id: string;
+  client_cert_path: string;
+  client_key_path: string;
+  ca_cert_path: string;
+  jwt_in_keychain: boolean;
 };
 
 export type EdgeNode = {

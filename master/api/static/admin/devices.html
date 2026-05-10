@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lucifer · Devices</title>
+  <style>
+    :root {
+      --bg: #0A0B0F; --surface: #13151B; --surface-elev: #1B1E27;
+      --border: #23262F; --text: #E8E9EE; --text-2: #9CA0AB; --text-3: #6B6F7B;
+      --primary: #7C5CFF; --success: #4ADE80; --warn: #FBBF24; --danger: #F87171;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, "SF Pro Text", "Geist", system-ui, sans-serif;
+      font-size: 14px; line-height: 1.5;
+    }
+    main { max-width: 720px; margin: 0 auto; padding: 48px 24px; }
+    header { display: flex; align-items: center; gap: 8px; margin-bottom: 32px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary);
+           box-shadow: 0 0 12px var(--primary); }
+    h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+    .card { background: var(--surface); border: 1px solid var(--border);
+            border-radius: 12px; padding: 24px; margin-bottom: 16px; }
+    label { display: block; font-size: 12px; color: var(--text-2); margin: 8px 0 4px; }
+    input {
+      width: 100%; background: var(--surface-elev); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 8px 12px;
+      font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 12px;
+    }
+    button {
+      background: var(--primary); color: white; border: 0; border-radius: 8px;
+      padding: 10px 16px; font: inherit; font-weight: 500; cursor: pointer;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .code-display {
+      font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+      font-size: 64px; font-weight: 600; letter-spacing: 0.15em;
+      text-align: center; padding: 24px 0; color: var(--primary);
+      text-shadow: 0 0 24px rgba(124, 92, 255, 0.4);
+    }
+    .countdown {
+      text-align: center; font-size: 13px; color: var(--text-3); margin-top: 8px;
+      font-variant-numeric: tabular-nums;
+    }
+    .error { color: var(--danger); font-size: 13px; margin-top: 12px; }
+    .success { color: var(--success); }
+    .footer { text-align: center; color: var(--text-3); font-size: 11px; margin-top: 32px; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row > input { flex: 1; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <span class="dot"></span>
+      <h1>Lucifer · Pair a device</h1>
+    </header>
+
+    <section class="card">
+      <h2 style="font-size:13px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:0.06em;margin:0 0 16px">
+        1 — Authenticate
+      </h2>
+      <label>Operator bearer token</label>
+      <input id="bearer" type="password" placeholder="paste app_secret_key from .env" />
+
+      <h2 style="font-size:13px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:0.06em;margin:24px 0 16px">
+        2 — Mint pairing code
+      </h2>
+      <label>Optional hint shown to operator</label>
+      <div class="row">
+        <input id="hint" placeholder="e.g. macbook-pro" />
+        <button id="mint-btn">Mint</button>
+      </div>
+      <div id="error" class="error"></div>
+    </section>
+
+    <section id="code-card" class="card" style="display:none">
+      <h2 style="font-size:13px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:0.06em;margin:0 0 8px">
+        3 — Show on the device
+      </h2>
+      <div class="code-display" id="code-display">000000</div>
+      <div class="countdown" id="countdown">expires in 60s</div>
+    </section>
+
+    <p class="footer">
+      Type the code into Lucifer's <strong>Pair this device</strong> screen
+      within the TTL window. The code is single-use.
+    </p>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let countdownTimer = null;
+
+    async function mint() {
+      const bearer = $("bearer").value.trim();
+      const hint = $("hint").value.trim() || null;
+      $("error").textContent = "";
+      if (!bearer) { $("error").textContent = "bearer token required"; return; }
+
+      $("mint-btn").disabled = true;
+      try {
+        const res = await fetch("/devices/admin/code", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "authorization": `Bearer ${bearer}`,
+          },
+          body: JSON.stringify({ issued_for: hint }),
+        });
+        if (!res.ok) {
+          const detail = await res.text();
+          throw new Error(`${res.status}: ${detail}`);
+        }
+        const body = await res.json();
+        showCode(body.code, body.ttl_seconds);
+      } catch (e) {
+        $("error").textContent = String(e);
+      } finally {
+        $("mint-btn").disabled = false;
+      }
+    }
+
+    function showCode(code, ttl) {
+      $("code-card").style.display = "block";
+      $("code-display").textContent = code;
+      const deadline = Date.now() + ttl * 1000;
+      if (countdownTimer) clearInterval(countdownTimer);
+      const tick = () => {
+        const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        $("countdown").textContent =
+          remaining > 0 ? `expires in ${remaining}s` : "expired — mint a new code";
+        if (remaining === 0 && countdownTimer) {
+          clearInterval(countdownTimer);
+          $("code-display").style.color = "var(--text-3)";
+        }
+      };
+      $("code-display").style.color = "var(--primary)";
+      tick();
+      countdownTimer = setInterval(tick, 250);
+    }
+
+    $("mint-btn").addEventListener("click", mint);
+  </script>
+</body>
+</html>

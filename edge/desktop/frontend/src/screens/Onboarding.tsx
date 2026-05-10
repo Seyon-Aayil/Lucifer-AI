@@ -34,19 +34,20 @@ export function Onboarding() {
         throw new Error(`pairing failed (${res.status}): ${detail}`);
       }
       const bundle = await res.json();
-      // The cert + key material would be persisted into the OS keychain by
-      // the Tauri shell here. For now we surface the bundle to the user and
-      // store the JWT on the connection state.
-      console.log("paired", { device_id: bundle.device_id, cn: bundle.common_name });
+      // Persist cert + key + CA to disk and JWT to OS keychain.
+      const persisted = await ipc.persistPairingBundle({
+        device_id: bundle.device_id,
+        jwt: bundle.jwt,
+        client_cert_pem_b64: bundle.client_cert_pem_b64,
+        client_key_pem_b64: bundle.client_key_pem_b64,
+        ca_cert_pem_b64: bundle.ca_cert_pem_b64,
+      });
       await ipc.connectMaster({
         masterEndpoint: endpoint,
-        deviceId: bundle.device_id,
-        // TODO: Tauri-side helper that decodes the b64 PEMs and writes them
-        // into the macOS Keychain, returning paths. Until that lands the
-        // user pastes them in via the dev surface.
-        clientCertPath: "",
-        clientKeyPath: "",
-        caCertPath: "",
+        deviceId: persisted.device_id,
+        clientCertPath: persisted.client_cert_path,
+        clientKeyPath: persisted.client_key_path,
+        caCertPath: persisted.ca_cert_path,
         jwt: bundle.jwt,
       });
       setStep(2);

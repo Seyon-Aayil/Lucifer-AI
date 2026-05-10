@@ -2,12 +2,13 @@
 //! directly without a Tauri context. The `#[tauri::command]` glue lives in the
 //! `__handlers` submodule and is gated behind the `tauri-cmd` feature.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use lucifer_offline_queue::ActionStatus;
 use lucifer_sync_client::SyncClient;
 
 use crate::{
+    keychain::{self, PairingBundle, PersistedCredentials},
     state::{ClientHandle, EdgeStoreHandle, InferenceHandle, OfflineQueueHandle},
     types::{ConnectArgs, ConnectError, TelemetryEvent},
 };
@@ -216,6 +217,34 @@ pub async fn local_backend(handle: &InferenceHandle) -> &'static str {
     handle.backend()
 }
 
+// ── Pairing & keychain ───────────────────────────────────────────────────────
+
+pub async fn persist_pairing_bundle(
+    app_data_dir: PathBuf,
+    bundle: PairingBundle,
+) -> Result<PersistedCredentials, ConnectError> {
+    tokio::task::spawn_blocking(move || keychain::persist_pairing_bundle(&app_data_dir, &bundle))
+        .await
+        .map_err(|e| ConnectError::Internal(format!("join error: {e}")))?
+}
+
+pub async fn read_stored_jwt(device_id: String) -> Result<Option<String>, ConnectError> {
+    tokio::task::spawn_blocking(move || keychain::read_stored_jwt(&device_id))
+        .await
+        .map_err(|e| ConnectError::Internal(format!("join error: {e}")))?
+}
+
+pub async fn forget_device(app_data_dir: PathBuf, device_id: String) -> Result<(), ConnectError> {
+    tokio::task::spawn_blocking(move || keychain::forget_device(&app_data_dir, &device_id))
+        .await
+        .map_err(|e| ConnectError::Internal(format!("join error: {e}")))?
+}
+
+#[allow(dead_code)]
+fn _path_marker(_p: &Path) {}
+
+// ── Local inference (continued) ──────────────────────────────────────────────
+
 pub async fn local_generate(
     handle: &InferenceHandle,
     model: String,
@@ -413,6 +442,37 @@ pub mod __handlers {
     }
 
     #[tauri::command]
+    pub async fn persist_pairing_bundle(
+        app: tauri::AppHandle,
+        bundle: PairingBundle,
+    ) -> Result<PersistedCredentials, ConnectError> {
+        use tauri::Manager;
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| ConnectError::Internal(format!("app_data_dir: {e}")))?;
+        super::persist_pairing_bundle(dir, bundle).await
+    }
+
+    #[tauri::command]
+    pub async fn read_stored_jwt(device_id: String) -> Result<Option<String>, ConnectError> {
+        super::read_stored_jwt(device_id).await
+    }
+
+    #[tauri::command]
+    pub async fn forget_device(
+        app: tauri::AppHandle,
+        device_id: String,
+    ) -> Result<(), ConnectError> {
+        use tauri::Manager;
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| ConnectError::Internal(format!("app_data_dir: {e}")))?;
+        super::forget_device(dir, device_id).await
+    }
+
+    #[tauri::command]
     pub async fn local_generate_stream(
         handle: State<'_, InferenceHandle>,
         model: String,
@@ -459,6 +519,9 @@ pub mod __handlers {
                 $crate::commands::__handlers::local_backend,
                 $crate::commands::__handlers::local_generate,
                 $crate::commands::__handlers::local_generate_stream,
+                $crate::commands::__handlers::persist_pairing_bundle,
+                $crate::commands::__handlers::read_stored_jwt,
+                $crate::commands::__handlers::forget_device,
             ]
         };
     }

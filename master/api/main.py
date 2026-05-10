@@ -16,6 +16,7 @@ import nats
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from redis.asyncio import Redis
 
@@ -196,6 +197,15 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix="/auth", tags=["auth"])
     app.include_router(devices.router, tags=["devices"])
     app.include_router(chat.router, prefix="/v1", tags=["chat"])
+
+    # ── Operator UI ────────────────────────────────────────────────────────
+    from pathlib import Path as _Path
+
+    _admin_static = _Path(__file__).parent / "static" / "admin"
+
+    @app.get("/admin/devices", include_in_schema=False)
+    async def _admin_devices_page() -> FileResponse:
+        return FileResponse(_admin_static / "devices.html")
 
     # ── OpenTelemetry Auto-instrumentation ──────────────────────────────────
     FastAPIInstrumentor.instrument_app(app)

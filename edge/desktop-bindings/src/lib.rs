@@ -26,9 +26,13 @@
 //! - `update_jwt(jwt)` — rotate the bearer token without reconnecting
 
 pub mod commands;
+pub mod keychain;
 pub mod state;
 pub mod types;
 
+pub use keychain::{
+    forget_device, persist_pairing_bundle, read_stored_jwt, PairingBundle, PersistedCredentials,
+};
 pub use state::{ClientHandle, EdgeStoreHandle, InferenceHandle, OfflineQueueHandle};
 pub use types::{ConnectArgs, ConnectError, TelemetryEvent};
 
