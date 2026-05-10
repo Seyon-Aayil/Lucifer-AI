@@ -22,6 +22,21 @@
         "transparent": false,
         "center": true,
         "url": "index.html"
+      },
+      {
+        "label": "overlay",
+        "title": "Lucifer Overlay",
+        "width": 720,
+        "height": 480,
+        "resizable": false,
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "center": true,
+        "url": "index.html#/overlay"
       }
     ],
     "security": {

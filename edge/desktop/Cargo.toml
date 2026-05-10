@@ -15,7 +15,8 @@ path = "src/main.rs"
 lucifer-desktop-bindings = { path = "../desktop-bindings" }
 lucifer-sync-client      = { path = "../sync-client" }
 
-tauri = { workspace = true, features = ["macos-private-api", "tray-icon"] }
+tauri = { workspace = true, features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "2"
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

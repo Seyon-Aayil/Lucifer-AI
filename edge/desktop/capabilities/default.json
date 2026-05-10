@@ -1,9 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability set for the Lucifer main window. Grants the IPC commands exposed by lucifer-desktop-bindings plus Tauri core defaults.",
-  "windows": ["main"],
+  "description": "Default capability set for Lucifer's main + overlay windows. Grants Tauri core defaults plus the global-shortcut permission needed for ⌘+Space hotkey.",
+  "windows": ["main", "overlay"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-is-registered"
   ]
 }
