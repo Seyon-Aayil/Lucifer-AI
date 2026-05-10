@@ -1,0 +1,29 @@
+[package]
+name = "lucifer-desktop-bindings"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Tauri 2.0 IPC commands that bridge the Lucifer WebView frontend to the sync-client crate."
+
+[features]
+# `tauri` feature gates the actual `#[tauri::command]` exports so the crate
+# can also be consumed as a plain library by tests / non-Tauri tooling.
+default = ["tauri-cmd"]
+tauri-cmd = ["dep:tauri"]
+
+[dependencies]
+lucifer-sync-client = { path = "../sync-client" }
+tauri = { workspace = true, optional = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }

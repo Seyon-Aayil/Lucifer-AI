@@ -8,15 +8,21 @@ Rust workspace for the edge clients (Phase 4b+). The first member is
 
 ```
 edge/
-├── Cargo.toml         # workspace manifest
-└── sync-client/       # gRPC client crate
-    ├── build.rs       # compiles proto via vendored protoc
+├── Cargo.toml             # workspace manifest
+├── sync-client/           # gRPC client crate
+│   ├── build.rs           # compiles proto via vendored protoc
+│   └── src/
+│       ├── lib.rs         # public API: SyncClient, ClientConfig, AuthInterceptor
+│       ├── auth.rs        # JWT bearer interceptor
+│       ├── config.rs      # connection settings + validation
+│       ├── error.rs       # typed errors
+│       └── transport.rs   # mTLS channel + RPC helpers
+└── desktop-bindings/      # Tauri 2.0 IPC commands wrapping sync-client
     └── src/
-        ├── lib.rs       # public API: SyncClient, ClientConfig, AuthInterceptor
-        ├── auth.rs      # JWT bearer interceptor
-        ├── config.rs    # connection settings + validation
-        ├── error.rs     # typed errors
-        └── transport.rs # mTLS channel + RPC helpers
+        ├── lib.rs         # public API: ClientHandle, ConnectArgs, handlers!()
+        ├── commands.rs    # connect_master / disconnect / get_hot_subgraph / …
+        ├── state.rs       # tokio::Mutex-protected SyncClient handle
+        └── types.rs       # JS-friendly DTOs + serializable error
 ```
 
 ## Build
@@ -29,10 +35,39 @@ make edge-lint       # fmt --check + clippy -D warnings
 
 `protoc` is bundled via `protoc-bin-vendored`; no system install required.
 
+## Wiring desktop-bindings into a Tauri 2.0 shell
+
+```rust
+fn main() {
+    tauri::Builder::default()
+        .manage(lucifer_desktop_bindings::ClientHandle::default())
+        .invoke_handler(lucifer_desktop_bindings::handlers!())
+        .run(tauri::generate_context!())
+        .expect("failed to launch Lucifer desktop");
+}
+```
+
+Call from the WebView:
+
+```ts
+import { invoke } from "@tauri-apps/api/core";
+
+await invoke("connect_master", { args: {
+    masterEndpoint: "https://lucifer.local:50051",
+    deviceId: "device-mac-01",
+    clientCertPath: "/path/to/client.pem",
+    clientKeyPath:  "/path/to/client.key",
+    caCertPath:     "/path/to/ca.pem",
+    jwt:            "<short-lived JWT>",
+}});
+
+const manifest = await invoke("get_hot_subgraph", { deviceId: "device-mac-01", lastSyncAtMs: 0 });
+```
+
 ## What's next
 
-- Tauri 2.0 app crate that links `sync-client` and exposes commands to the
-  WebView frontend.
+- Tauri 2.0 binary crate (window, hotkey, menu-bar, icons) — host for the
+  WebView and the Stitch-generated screens.
 - `sqlite-vec` edge graph store crate.
 - Offline action queue + deterministic replay (SQLite WAL).
-- Hotkey overlay + menu-bar UI.
+- Hotkey overlay + menu-bar UI integration.
