@@ -45,15 +45,18 @@ export function Conversation() {
     setMessages((m) => [...m, userMsg, placeholder]);
     setBusy(true);
     try {
-      const reply = await ipc.localGenerate(DEFAULT_MODEL, prompt);
-      setMessages((m) => {
-        const next = [...m];
-        next[next.length - 1] = {
-          ...next[next.length - 1],
-          content: reply || "(empty response)",
-          pending: false,
-        };
-        return next;
+      let acc = "";
+      await ipc.localGenerateStream(DEFAULT_MODEL, prompt, (chunk) => {
+        acc += chunk.text;
+        setMessages((m) => {
+          const next = [...m];
+          next[next.length - 1] = {
+            ...next[next.length - 1],
+            content: acc,
+            pending: !chunk.done,
+          };
+          return next;
+        });
       });
     } catch (e) {
       const msg = String(e);

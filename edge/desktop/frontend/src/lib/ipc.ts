@@ -3,7 +3,7 @@
 // loaded outside Tauri (e.g. `vite preview` in a normal browser) so the dev
 // loop stays usable.
 
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { Channel, invoke as tauriInvoke } from "@tauri-apps/api/core";
 
 export type ConnectArgs = {
   masterEndpoint: string;
@@ -109,6 +109,42 @@ export const ipc = {
   localBackend: () => invoke<string>("local_backend"),
   localGenerate: (model: string, prompt: string) =>
     invoke<string>("local_generate", { model, prompt }),
+
+  /**
+   * Streaming variant of `local_generate`. Returns a promise that resolves
+   * once the backend signals `done = true` (or rejects on error). The
+   * `onChunk` callback fires for every token batch received.
+   */
+  localGenerateStream(
+    model: string,
+    prompt: string,
+    onChunk: (chunk: { text: string; done: boolean; eval_count: number | null }) => void,
+  ): Promise<void> {
+    if (!inTauri) {
+      // Browser fallback emits a single mock chunk and resolves.
+      onChunk({ text: "(mock stream)", done: true, eval_count: null });
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve, reject) => {
+      const channel = new Channel<{ text: string; done: boolean; eval_count: number | null }>();
+      let done = false;
+      channel.onmessage = (msg) => {
+        onChunk(msg);
+        if (msg.done) {
+          done = true;
+        }
+      };
+      tauriInvoke<void>("local_generate_stream", { model, prompt, channel })
+        .then(() => {
+          if (!done) {
+            // Emit a synthetic terminal chunk so callers don't hang.
+            onChunk({ text: "", done: true, eval_count: null });
+          }
+          resolve();
+        })
+        .catch(reject);
+    });
+  },
 
   inTauri,
 };

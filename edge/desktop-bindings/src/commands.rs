@@ -227,6 +227,36 @@ pub async fn local_generate(
         .map_err(|e| ConnectError::Internal(format!("inference: {e}")))
 }
 
+/// Streaming variant. Each chunk is shaped as `{"text": String, "done": bool}`.
+/// The caller is expected to be a Tauri `Channel<serde_json::Value>` so the
+/// WebView gets a hot stream of tokens.
+pub async fn local_generate_stream_inner<F>(
+    handle: &InferenceHandle,
+    model: String,
+    prompt: String,
+    mut emit: F,
+) -> Result<(), ConnectError>
+where
+    F: FnMut(serde_json::Value) + Send + 'static,
+{
+    use futures::StreamExt;
+    let inf = handle.inference();
+    let mut stream = inf
+        .generate_stream(&model, &prompt)
+        .await
+        .map_err(|e| ConnectError::Internal(format!("inference: {e}")))?;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| ConnectError::Internal(format!("stream: {e}")))?;
+        let payload = serde_json::json!({
+            "text": chunk.text,
+            "done": chunk.done,
+            "eval_count": chunk.eval_count,
+        });
+        emit(payload);
+    }
+    Ok(())
+}
+
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -382,6 +412,24 @@ pub mod __handlers {
         super::local_generate(handle.inner(), model, prompt).await
     }
 
+    #[tauri::command]
+    pub async fn local_generate_stream(
+        handle: State<'_, InferenceHandle>,
+        model: String,
+        prompt: String,
+        channel: tauri::ipc::Channel<serde_json::Value>,
+    ) -> Result<(), ConnectError> {
+        super::local_generate_stream_inner(handle.inner(), model, prompt, move |chunk| {
+            // Channel send returns Result; failures mean the WebView dropped
+            // the listener — log and stop streaming further chunks (the loop
+            // continues but emits will become no-ops).
+            if let Err(e) = channel.send(chunk) {
+                tracing::warn!(error = %e, "local_generate_stream: channel send failed");
+            }
+        })
+        .await
+    }
+
     // Tauri's `generate_handler!` cannot be wrapped in a generic-returning fn
     // because the resulting type closes over `Builder`'s runtime parameter. The
     // recommended pattern is to call the macro directly at the call-site, e.g.
@@ -410,6 +458,7 @@ pub mod __handlers {
                 $crate::commands::__handlers::list_nodes_by_type,
                 $crate::commands::__handlers::local_backend,
                 $crate::commands::__handlers::local_generate,
+                $crate::commands::__handlers::local_generate_stream,
             ]
         };
     }
