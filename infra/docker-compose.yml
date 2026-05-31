@@ -29,7 +29,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./infra/postgres/migrations:/docker-entrypoint-initdb.d:ro
+      # NOTE: schema is applied via Alembic (`make migrate`), not the initdb
+      # auto-mount, so migrations have a single source of truth. See README §3.
     healthcheck:
       <<: *healthcheck-defaults
       test: ["CMD-SHELL", "pg_isready -U lucifer -d lucifer"]

@@ -1,8 +1,9 @@
 # Lucifer AI — Detailed System Architecture
 
-> **Version:** 0.3 (Phase 2 Complete)  
-> **Last Updated:** 2026-04-25  
-> **Status:** Phase 3 In Progress — Agent Swarm + News Pipeline
+> **Version:** 0.5 (Phase 4a Complete + Phase 4b Foundation Complete)  
+> **Last Updated:** 2026-05-31  
+> **Status:** Phase 4b — Desktop production ship in progress (code-signing, MLX forward
+> pass, hotkey-preferences UI); Phase 4c (Tauri mobile go/no-go) next
 
 ---
 

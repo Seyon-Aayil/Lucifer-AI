@@ -333,8 +333,10 @@ Enforces: Ruff lint, Ruff format, mypy, no secrets, no direct commits to `main`.
 | **Phase 0** — Bootstrap | 2 weeks | ✅ **Done** | All Docker services running; CI green |
 | **Phase 1** — Foundation | 6 weeks | ✅ **Done** | E2E chat: input → Librarian → LLM → memory write |
 | **Phase 2** — Integrations | 6 weeks | ✅ **Done** | Gmail/GCal/Notion/GitHub MCPs + Docker sandbox + budget hardening |
-| **Phase 3** — Agents + News | 8 weeks | 🔄 **In Progress** | All 5 specialist agents + LibrarianAgent full wiring + news digest pipeline |
-| **Phase 4** — Desktop | 6 weeks | ⏳ Planned | macOS offline app (Tauri 2.0 + Ollama + gRPC sync) |
+| **Phase 3** — Agents + News | 8 weeks | ✅ **Done** | All 5 specialist agents + LibrarianAgent full wiring + news digest pipeline |
+| **Phase 4a** — Master Sync | 4 weeks | ✅ **Done** | gRPC + mTLS sync server, conflict resolver, hot-subgraph, telemetry sink |
+| **Phase 4b** — Desktop | 6 weeks | 🔄 **Foundation done** | macOS Tauri 2.0 app + Ollama/MLX + gRPC sync (ship pending: code-signing, MLX forward pass) |
+| **Phase 4c** — Mobile go/no-go | 1 week | ⏳ Planned | Tauri 2.0 iOS/Android vs React Native decision |
 | **Phase 5** — Mobile | 8 weeks | ⏳ Planned | iOS (Foundation Models) + Android (ONNX) + OTA upgrade |
 | **Phase 6** — Watch + Polish | 6 weeks | ⏳ Planned | Apple Watch + security hardening + load testing |
 
@@ -342,7 +344,11 @@ Enforces: Ruff lint, Ruff format, mypy, no secrets, no direct commits to `main`.
 
 **DoD — Phase 2 ✅:** MCP servers (Gmail, GCal, Notion, GitHub) running in Docker sandboxes; agents invoke tools via `MCPClient.invoke()` with manifest ACL, schema validation, and HMAC audit trail; real-time budget enforcement via `SpendTracker` before every LLM call.
 
-**DoD — Phase 3 (target):** All 5 specialist agents (`personal`, `coding`, `financial`, `health`, `research`) operational with live MCP tool calls; LibrarianAgent fully wired to Mem0 + Zep + Neo4j; news digest pipeline running on schedule; `AsyncPostgresSaver` replacing in-memory LangGraph checkpointer.
+**DoD — Phase 3 ✅:** All 5 specialist agents (`personal`, `coding`, `financial`, `health`, `research`) operational with live MCP tool calls; LibrarianAgent fully wired to Mem0 + Zep + Neo4j; news pipeline running on schedule; `AsyncPostgresSaver` replacing in-memory LangGraph checkpointer.
+
+**DoD — Phase 4a ✅:** Edge client opens mTLS gRPC connection, pushes encrypted node/edge deltas with vector-clock, receives conflict-resolved updates, pulls hot-subgraph, and pushes telemetry.
+
+**DoD — Phase 4b (foundation ✅):** macOS Tauri 2.0 app builds + launches with main window, frameless overlay, tray icon, ⌘+Space hotkey, mTLS gRPC client, offline queue, sqlite-vec edge KG mirror, Ollama sidecar. Remaining for production ship: code-signing + notarised `.dmg`, MLX forward pass, hotkey-preferences UI.
 
 
 ---
