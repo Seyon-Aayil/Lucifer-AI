@@ -39,8 +39,10 @@ from master.core.auth.jwt import create_access_token, create_refresh_token
 from master.core.auth.operator import (
     InvalidCredentialsError,
     is_operator_login_configured,
-    login as operator_login,
     validate_operator_session,
+)
+from master.core.auth.operator import (
+    login as operator_login,
 )
 from master.core.auth.rate_limit import FixedWindowRateLimiter
 from master.core.auth.revocation import RevocationStore

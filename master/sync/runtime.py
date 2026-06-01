@@ -11,6 +11,7 @@ Usage in FastAPI lifespan:
     ...
     await grpc_server.stop(grace=5)
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -89,7 +90,11 @@ async def start_grpc_server(
 
 def _load_credentials(settings: Settings) -> grpc.ServerCredentials | None:
     """Return mTLS ServerCredentials if all TLS paths are configured."""
-    if not (settings.grpc_tls_cert_path and settings.grpc_tls_key_path and settings.grpc_tls_client_ca_path):
+    if not (
+        settings.grpc_tls_cert_path
+        and settings.grpc_tls_key_path
+        and settings.grpc_tls_client_ca_path
+    ):
         return None
     try:
         with open(settings.grpc_tls_cert_path, "rb") as f:

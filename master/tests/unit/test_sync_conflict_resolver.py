@@ -109,9 +109,15 @@ class TestHotSubgraphSizeCap:
         from master.sync.hot_subgraph import HotSubgraphBuilder
 
         nodes = [
-            {"node_id": f"n{i}", "payload": b"x" * 100, "updated_at": i,
-             "operation": "upsert", "node_type": "Memory",
-             "classification": "standard", "source_agent": ""}
+            {
+                "node_id": f"n{i}",
+                "payload": b"x" * 100,
+                "updated_at": i,
+                "operation": "upsert",
+                "node_type": "Memory",
+                "classification": "standard",
+                "source_agent": "",
+            }
             for i in range(5)
         ]
         edges: list[dict] = []
@@ -125,15 +131,19 @@ class TestHotSubgraphSizeCap:
         from master.sync.hot_subgraph import HotSubgraphBuilder
 
         nodes = [
-            {"node_id": f"n{i}", "payload": b"x" * 200, "updated_at": i,
-             "operation": "upsert", "node_type": "Memory",
-             "classification": "standard", "source_agent": ""}
+            {
+                "node_id": f"n{i}",
+                "payload": b"x" * 200,
+                "updated_at": i,
+                "operation": "upsert",
+                "node_type": "Memory",
+                "classification": "standard",
+                "source_agent": "",
+            }
             for i in range(10)
         ]
         edges: list[dict] = []
-        result_nodes, _, capped = HotSubgraphBuilder._apply_size_cap(
-            nodes, edges, cap_bytes=500
-        )
+        result_nodes, _, capped = HotSubgraphBuilder._apply_size_cap(nodes, edges, cap_bytes=500)
         assert len(result_nodes) < 10
         assert capped
 
