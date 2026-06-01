@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from master.core.auth.cert_mint import mint_client_credentials
@@ -78,21 +78,17 @@ def test_minted_cert_chain_validates(dev_ca):
     cert = x509.load_pem_x509_certificate(creds.client_cert_pem)
     # Cert was issued by the CA (subject match) and signature verifies.
     assert cert.issuer == ca.subject
-    ca.public_key().verify(
+    # cert_mint issues RSA certs; narrow the public-key union so the RSA-specific
+    # verify() overload (padding + hash) type-checks.
+    ca_pub = ca.public_key()
+    assert isinstance(ca_pub, rsa.RSAPublicKey)
+    assert cert.signature_hash_algorithm is not None
+    ca_pub.verify(
         cert.signature,
         cert.tbs_certificate_bytes,
-        # cryptography's `verify` for RSA needs padding + hash explicitly.
-        # We use the same algo cert_mint chose.
-        # Importing inside the test to keep top-level imports tidy.
-        __import_padding(),
+        padding.PKCS1v15(),
         cert.signature_hash_algorithm,
     )
-
-
-def __import_padding():
-    from cryptography.hazmat.primitives.asymmetric import padding
-
-    return padding.PKCS1v15()
 
 
 def test_minted_cert_has_client_auth_eku(dev_ca):

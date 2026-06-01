@@ -34,9 +34,7 @@ def event_loop_policy():
 
 @pytest.fixture
 def mock_librarian():
-    """Mock LibrarianClient. Always spec to catch interface drift."""
-    from master.agents.librarian import LibrarianClient  # noqa: F401 — future import
-
+    """Mock librarian client used by orchestrator-level tests."""
     client = AsyncMock()
     from master.agents.base.agent import ContextPackage
 

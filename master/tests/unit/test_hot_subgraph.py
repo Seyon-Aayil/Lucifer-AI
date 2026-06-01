@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from master.sync.hot_subgraph import HotSubgraphBuilder
 
 
-def _node(node_id: str, payload: bytes, classification: str = "standard") -> dict:
+def _node(node_id: str, payload: bytes, classification: str = "standard") -> dict[str, Any]:
     return {
         "node_id": node_id,
         "operation": "upsert",
@@ -19,7 +20,7 @@ def _node(node_id: str, payload: bytes, classification: str = "standard") -> dic
     }
 
 
-def _edge(edge_id: str, src: str, dst: str, relation: str = "RELATED_TO") -> dict:
+def _edge(edge_id: str, src: str, dst: str, relation: str = "RELATED_TO") -> dict[str, Any]:
     return {
         "edge_id": edge_id,
         "operation": "upsert",
@@ -107,7 +108,7 @@ def test_apply_size_cap_drops_lowest_priority():
         _node("middle", b"x" * 20),
         _node("oldest", b"x" * 20),
     ]
-    edges = []
+    edges: list[dict[str, Any]] = []
     kept_nodes, _, capped = HotSubgraphBuilder._apply_size_cap(nodes, edges, 25)
     assert capped is True
     assert len(kept_nodes) == 1

@@ -77,18 +77,16 @@ class RevocationStore:
 
     async def revoke_cert_serial(self, serial: int) -> None:
         """Add a cert serial number to the revoked set. Idempotent."""
-        await self._redis.sadd(_CERT_SET_KEY, _format_serial(serial))  # type: ignore[misc]
+        await self._redis.sadd(_CERT_SET_KEY, _format_serial(serial))
         log.info("auth.cert.revoked", serial=hex(serial))
 
     async def is_cert_serial_revoked(self, serial: int) -> bool:
         """Cheap lookup: SISMEMBER against the revoked-serials set."""
-        return bool(
-            await self._redis.sismember(_CERT_SET_KEY, _format_serial(serial))  # type: ignore[misc]
-        )
+        return bool(await self._redis.sismember(_CERT_SET_KEY, _format_serial(serial)))
 
     async def list_revoked_cert_serials(self) -> list[str]:
         """Return all currently-revoked serials (hex), oldest first is not guaranteed."""
-        raw = await self._redis.smembers(_CERT_SET_KEY)  # type: ignore[misc]
+        raw = await self._redis.smembers(_CERT_SET_KEY)
         out: list[str] = []
         for item in raw:
             if isinstance(item, bytes):

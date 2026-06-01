@@ -92,13 +92,16 @@ async def readiness(request: Request) -> dict[str, Any]:
     settings = get_settings()
 
     # Run all checks in parallel
-    postgres_check, neo4j_check, redis_check, litellm_check = await asyncio.gather(
-        _check_postgres(settings.database_url),
-        _check_neo4j(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password),
-        _check_redis(settings.redis_url),
-        _check_litellm(settings.litellm_proxy_url),
-        return_exceptions=True,
+    check_results: list[dict[str, Any] | BaseException] = list(
+        await asyncio.gather(
+            _check_postgres(settings.database_url),
+            _check_neo4j(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password),
+            _check_redis(settings.redis_url),
+            _check_litellm(settings.litellm_proxy_url),
+            return_exceptions=True,
+        )
     )
+    postgres_check, neo4j_check, redis_check, litellm_check = check_results
 
     # NATS is checked via app.state
     nats_status: dict[str, Any]

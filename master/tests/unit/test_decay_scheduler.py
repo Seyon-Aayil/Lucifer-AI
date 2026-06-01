@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -30,6 +31,7 @@ def test_parse_dt_aware_datetime_passthrough():
 def test_parse_dt_naive_datetime_gets_utc():
     naive = datetime(2026, 1, 1, 12, 0)
     result = _parse_dt(naive)
+    assert result is not None
     assert result.tzinfo is UTC
 
 
@@ -40,6 +42,7 @@ def test_parse_dt_iso_string():
 
 def test_parse_dt_iso_string_naive_gets_utc():
     result = _parse_dt("2026-01-01T12:00:00")
+    assert result is not None
     assert result.tzinfo is UTC
 
 
@@ -76,7 +79,7 @@ def test_attach_default_2am():
 # ── run_decay_cycle ───────────────────────────────────────────────────────────
 
 
-def _make_node(node_id: str, decay_score: float | None, days_old: float) -> dict:
+def _make_node(node_id: str, decay_score: float | None, days_old: float) -> dict[str, Any]:
     updated = datetime.now(UTC) - timedelta(days=days_old)
     return {
         "id": node_id,
@@ -93,7 +96,7 @@ def graph_client():
     return gc
 
 
-def _stub_fetch(scheduler: DecayScheduler, nodes: list[dict]) -> None:
+def _stub_fetch(scheduler: DecayScheduler, nodes: list[dict[str, Any]]) -> None:
     """Replace _fetch_tracked_nodes with a coroutine returning the given nodes."""
     scheduler._fetch_tracked_nodes = AsyncMock(return_value=nodes)  # type: ignore[method-assign]
 

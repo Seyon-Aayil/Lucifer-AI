@@ -209,7 +209,7 @@ async def test_model_promoter_auto_promote_activates():
     async def activate(model_id: str) -> None:
         activated.append(model_id)
 
-    async def request_confirmation(outcome) -> None:  # type: ignore[no-untyped-def]
+    async def request_confirmation(outcome) -> None:
         confirmations.append(outcome.candidate_id)
 
     promoter = ModelPromoter(activate=activate, request_confirmation=request_confirmation)
@@ -227,7 +227,7 @@ async def test_model_promoter_confirmation_band_requests_signoff():
     async def activate(model_id: str) -> None:
         activated.append(model_id)
 
-    async def request_confirmation(outcome) -> None:  # type: ignore[no-untyped-def]
+    async def request_confirmation(outcome) -> None:
         confirmations.append(outcome.candidate_id)
 
     promoter = ModelPromoter(activate=activate, request_confirmation=request_confirmation)
@@ -245,7 +245,7 @@ async def test_model_promoter_reject_is_noop():
     async def activate(model_id: str) -> None:
         activated.append(model_id)
 
-    async def request_confirmation(outcome) -> None:  # type: ignore[no-untyped-def]
+    async def request_confirmation(outcome) -> None:
         confirmations.append(outcome.candidate_id)
 
     promoter = ModelPromoter(activate=activate, request_confirmation=request_confirmation)

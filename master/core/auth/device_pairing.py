@@ -70,7 +70,7 @@ class PairingCodeStore:
         if not _is_valid_format(code):
             return None
         # eval returns bytes or None
-        raw = await self._redis.eval(  # type: ignore[no-untyped-call]
+        raw = await self._redis.eval(
             _LUA_GETDEL,
             1,
             f"{_REDIS_PREFIX}{code}",

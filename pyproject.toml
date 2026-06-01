@@ -160,6 +160,15 @@ module = [
 ]
 ignore_errors = true
 
+# Tests keep full body type-checking, but are exempt from the strict
+# requirement that every test function / pytest fixture carry parameter and
+# return annotations — that ceremony adds noise without catching real bugs.
+[[tool.mypy.overrides]]
+module = ["master.tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_decorators = false
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["master/tests"]

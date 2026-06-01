@@ -25,7 +25,7 @@ from __future__ import annotations
 import base64
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -164,7 +164,7 @@ def _redis_dep(request: Request) -> Redis:
 
         redis = _Redis.from_url(get_settings().redis_url)
         request.app.state.redis = redis
-    return redis  # type: ignore[no-any-return]
+    return redis
 
 
 def _pairing_store(redis: Annotated[Redis, Depends(_redis_dep)]) -> PairingCodeStore:
@@ -202,7 +202,7 @@ def _client_ip(request: Request) -> str:
     return "unknown"
 
 
-def _require_admin(authorization: Annotated[str | None, Header()] = None) -> dict:
+def _require_admin(authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
     """
     Operator gate. Order of preference:
 
@@ -284,7 +284,7 @@ async def admin_login(body: OperatorLoginRequest) -> OperatorLoginResponse:
     summary="Inspect the current operator session.",
 )
 async def admin_whoami(
-    payload: Annotated[dict, Depends(_require_admin)],
+    payload: Annotated[dict[str, Any], Depends(_require_admin)],
 ) -> OperatorWhoamiResponse:
     return OperatorWhoamiResponse(
         username=str(payload.get("sub", "")),

@@ -34,12 +34,12 @@ from master.sync.conflict_resolver import (
     candidate_from_node_delta,
 )
 from master.sync.hot_subgraph import HotSubgraphBuilder
-from master.sync.lucifer_sync_pb2 import (  # type: ignore[import]
+from master.sync.lucifer_sync_pb2 import (  # type: ignore[attr-defined]
     PushAck,
     SubgraphResponse,
     SyncMessage,
 )
-from master.sync.lucifer_sync_pb2_grpc import (  # type: ignore[import]
+from master.sync.lucifer_sync_pb2_grpc import (
     LuciferSyncServicer as _Base,
 )
 from master.sync.telemetry_sink import TelemetrySink
@@ -75,7 +75,7 @@ class LuciferSyncServicer(_Base):
     async def SyncStream(  # noqa: N802
         self,
         request_iterator: AsyncIterator[SyncMessage],
-        context: grpc.aio.ServicerContext,  # type: ignore[type-arg]
+        context: grpc.aio.ServicerContext,
     ) -> AsyncIterator[SyncMessage]:
         caller = current_caller.get()
         device_id = caller.device_id if caller else "unknown"
@@ -149,7 +149,7 @@ class LuciferSyncServicer(_Base):
     async def GetHotSubgraph(  # noqa: N802
         self,
         request: Any,
-        context: grpc.aio.ServicerContext,  # type: ignore[type-arg]
+        context: grpc.aio.ServicerContext,
     ) -> SubgraphResponse:
         caller = current_caller.get()
         device_id = caller.device_id if caller else request.device_id
@@ -198,7 +198,7 @@ class LuciferSyncServicer(_Base):
     async def PushTelemetry(  # noqa: N802
         self,
         request: Any,
-        context: grpc.aio.ServicerContext,  # type: ignore[type-arg]
+        context: grpc.aio.ServicerContext,
     ) -> PushAck:
         result = await self._telemetry_sink.ingest(request)
         log.debug(
@@ -229,7 +229,7 @@ class LuciferSyncServicer(_Base):
             msg.SerializeToString()[::-1]  # crude; replace with proper AEAD in Phase 4b
         )
         expected = hashlib.sha256(payload_bytes).digest()[:16]
-        return msg.payload_hmac[:16] == expected
+        return bool(msg.payload_hmac[:16] == expected)
 
     async def _resolve_node(
         self, delta: Any, vector_clock: int, device_id: str

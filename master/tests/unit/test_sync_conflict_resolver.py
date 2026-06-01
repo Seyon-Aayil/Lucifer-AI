@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from master.sync.conflict_resolver import (
     AgentPriority,
     ConflictResolver,
@@ -120,7 +122,7 @@ class TestHotSubgraphSizeCap:
             }
             for i in range(5)
         ]
-        edges: list[dict] = []
+        edges: list[dict[str, Any]] = []
         result_nodes, result_edges, capped = HotSubgraphBuilder._apply_size_cap(
             nodes, edges, cap_bytes=10_000
         )
@@ -142,7 +144,7 @@ class TestHotSubgraphSizeCap:
             }
             for i in range(10)
         ]
-        edges: list[dict] = []
+        edges: list[dict[str, Any]] = []
         result_nodes, _, capped = HotSubgraphBuilder._apply_size_cap(nodes, edges, cap_bytes=500)
         assert len(result_nodes) < 10
         assert capped
@@ -151,7 +153,7 @@ class TestHotSubgraphSizeCap:
         from master.sync.hot_subgraph import HotSubgraphBuilder
 
         nodes = [{"node_id": "n1", "payload": b"data"}]
-        edges: list[dict] = []
+        edges: list[dict[str, Any]] = []
         h1 = HotSubgraphBuilder._hash_manifest(nodes, edges)
         h2 = HotSubgraphBuilder._hash_manifest(nodes, edges)
         assert h1 == h2

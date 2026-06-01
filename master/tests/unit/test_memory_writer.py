@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Literal, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -33,7 +34,10 @@ def writer(mock_graph_client):
     return w
 
 
-def _delta(classification: str = "standard", op: str = "upsert") -> MemoryDelta:
+def _delta(
+    classification: str = "standard",
+    op: Literal["upsert", "soft_delete", "edge_upsert", "edge_delete"] = "upsert",
+) -> MemoryDelta:
     return MemoryDelta(
         operation=op,
         node_type="Memory",
@@ -155,8 +159,8 @@ async def test_no_graph_client_skips_neo4j(mock_graph_client):
         writer = MemoryWriter(graph_client=None)
     await writer.apply_deltas([_delta("standard")])
     # Graph client is None — Neo4j skipped; cloud stores still receive writes
-    writer._mem0.add.assert_awaited_once()
-    writer._zep.add_episode.assert_awaited_once()
+    cast(AsyncMock, writer._mem0.add).assert_awaited_once()
+    cast(AsyncMock, writer._zep.add_episode).assert_awaited_once()
 
 
 # ── _delta_to_text ────────────────────────────────────────────────────────────

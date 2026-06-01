@@ -18,6 +18,7 @@ import uuid
 from typing import Any
 
 import httpx
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 from master.agents.base.agent import (
@@ -122,7 +123,7 @@ async def route_node(state: OrchestratorState) -> dict[str, Any]:
         return {"agent_request": request}
 
 
-async def execute_node(state: OrchestratorState, config: dict[str, Any]) -> dict[str, Any]:
+async def execute_node(state: OrchestratorState, config: RunnableConfig) -> dict[str, Any]:
     """
     Dispatch the agent request to the selected agent via AgentPool.
     Falls back to PersonalAgent for unregistered agent IDs.
