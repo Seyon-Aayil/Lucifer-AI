@@ -123,7 +123,7 @@ fn build_inference_handle() -> InferenceHandle {
             if h.starts_with("http") {
                 h
             } else {
-                format!("http://{}", h)
+                format!("http://{h}")
             }
         })
         .unwrap_or_else(|| "http://127.0.0.1:11434".to_string());
