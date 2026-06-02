@@ -12,7 +12,7 @@ description = "Apple-Silicon MLX inference backend for the Lucifer edge clients 
 # Apple Silicon hardware. Off by default so non-Apple-Silicon checkouts (and
 # CI runners without cmake) keep building.
 default = []
-mlx = ["dep:mlx-rs", "dep:tokenizers", "dep:safetensors"]
+mlx = ["dep:mlx-rs", "dep:tokenizers", "dep:safetensors", "dep:tokio-stream"]
 
 [dependencies]
 lucifer-ollama-sidecar = { path = "../ollama-sidecar" }
@@ -27,6 +27,7 @@ serde_json = { workspace = true }
 mlx-rs = { version = "0.25", optional = true }
 tokenizers = { version = "0.23", default-features = false, features = ["onig"], optional = true }
 safetensors = { version = "0.7", optional = true }
+tokio-stream = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }

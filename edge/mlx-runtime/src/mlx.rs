@@ -15,20 +15,7 @@
 //!   model.safetensors    # weights with the standard Llama key naming
 //! ```
 //!
-//! ## Status
-//!
-//! - **Weight + tokenizer loading**: implemented (safetensors → mlx Array,
-//!   tokenizer.json → `tokenizers::Tokenizer`).
-//! - **Generation loop wiring**: implemented — bridges
-//!   [`Inference::generate_stream`] to a blocking sampling loop via
-//!   `spawn_blocking` and `tokio::sync::mpsc::unbounded_channel`.
-//! - **Transformer forward pass**: structurally laid out (per-block
-//!   `forward()`) but the matmul/RoPE/SwiGLU body is left as a TODO so
-//!   shape and dtype mismatches can be caught by humans against a real
-//!   model file. The Ollama fallback covers production users until this
-//!   gap closes.
-
-#![cfg(feature = "mlx")]
+//! Gated on the `mlx` feature by `lib.rs` (`#[cfg(feature = "mlx")] pub mod mlx`).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -36,7 +23,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures::Stream;
-use mlx_rs::{Array, Dtype};
+use mlx_rs::{fast, ops, Array, Dtype};
 use safetensors::SafeTensors;
 use serde::Deserialize;
 use tokenizers::Tokenizer;
@@ -94,7 +81,6 @@ impl LlamaConfig {
 
 // ── Weights ──────────────────────────────────────────────────────────────────
 
-/// Read a safetensors file into `(name → Array)`. Supports F32 / F16 / BF16.
 fn load_weights(path: &Path) -> Result<HashMap<String, Array>> {
     let bytes = std::fs::read(path)
         .map_err(|e| Error::MlxUnavailable(format!("read weights {}: {e}", path.display())))?;
@@ -116,10 +102,221 @@ fn load_weights(path: &Path) -> Result<HashMap<String, Array>> {
                 )))
             }
         };
-        let array = Array::from_slice(view.data(), &shape, dtype);
+        // safetensors gives raw little-endian bytes + a runtime dtype; build the
+        // Array directly from the byte buffer rather than via the dtype-inferred
+        // `from_slice` (which would mis-tag the bytes as Uint8).
+        let array = unsafe {
+            Array::from_raw_data(
+                view.data().as_ptr() as *const std::ffi::c_void,
+                &shape,
+                dtype,
+            )
+        };
         out.insert(name.to_string(), array);
     }
     Ok(out)
+}
+
+// ── KV cache ─────────────────────────────────────────────────────────────────
+
+/// Per-layer key/value cache. Each entry grows along the time axis.
+pub struct KvCache {
+    pub layers: Vec<Option<(Array, Array)>>,
+}
+
+impl KvCache {
+    pub fn new(n_layers: usize) -> Self {
+        Self {
+            layers: (0..n_layers).map(|_| None).collect(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        for slot in &mut self.layers {
+            *slot = None;
+        }
+    }
+
+    /// Number of cached k/v positions in any layer (they're kept in sync).
+    pub fn position(&self) -> i32 {
+        self.layers
+            .first()
+            .and_then(|slot| slot.as_ref())
+            .map(|(k, _)| k.shape()[2])
+            .unwrap_or(0)
+    }
+}
+
+// ── Math helpers ─────────────────────────────────────────────────────────────
+
+fn mlx_err(e: mlx_rs::error::Exception) -> Error {
+    Error::MlxUnavailable(format!("mlx op: {e}"))
+}
+
+/// Llama-style RMSNorm: `x * rsqrt(mean(x², -1) + eps) * weight`.
+fn rms_norm(x: &Array, weight: &Array, eps: f32) -> Result<Array> {
+    let sq = ops::multiply(x, x).map_err(mlx_err)?;
+    let mean = ops::mean_axis(&sq, -1, true).map_err(mlx_err)?;
+    let denom = ops::add(&mean, Array::from_f32(eps)).map_err(mlx_err)?;
+    let rstd = ops::rsqrt(&denom).map_err(mlx_err)?;
+    let normed = ops::multiply(x, &rstd).map_err(mlx_err)?;
+    ops::multiply(&normed, weight).map_err(mlx_err)
+}
+
+/// HuggingFace Linear: y = x @ w.T  (w stored as [out, in]).
+fn linear(x: &Array, weight: &Array) -> Result<Array> {
+    ops::matmul(x, weight.t()).map_err(mlx_err)
+}
+
+/// Causal mask over (T_q, T_k) where queries can attend keys at positions
+/// `0..=offset+i` for query position `i`. For prefill T_q == T_k; for
+/// per-token decoding T_q == 1 and the mask is a no-op.
+fn build_causal_mask(t_q: i32, t_k: i32, dtype: Dtype) -> Result<Array> {
+    if t_q <= 1 {
+        // 1×T_k row is fully visible — no masking required.
+        return Array::from_f32(0.0).as_dtype(dtype).map_err(mlx_err);
+    }
+    // tri(M, N, k) yields a (M, N) matrix with 1s where j <= i + k, else 0.
+    let tri = ops::tri::<f32>(t_q, Some(t_k), Some(t_k - t_q)).map_err(mlx_err)?;
+    // Convert {0, 1} → {-inf, 0}: where(tri == 0, -inf, 0)
+    let zeros = ops::zeros_like(&tri).map_err(mlx_err)?;
+    let neg_inf =
+        ops::full::<f32>(tri.shape(), &Array::from_f32(f32::NEG_INFINITY)).map_err(mlx_err)?;
+    let mask = ops::r#where(&tri, &zeros, &neg_inf).map_err(mlx_err)?;
+    mask.as_dtype(dtype).map_err(mlx_err)
+}
+
+/// Greatest common divisor — helper for GQA expansion shape math.
+fn repeat_kv(arr: &Array, n_repeat: i32) -> Result<Array> {
+    if n_repeat == 1 {
+        return Ok(arr.clone());
+    }
+    // arr: (B, n_kv_heads, T, head_dim)
+    // Expand head axis from n_kv_heads → n_kv_heads * n_repeat
+    let s = arr.shape();
+    let (b, n_kv, t, d) = (s[0], s[1], s[2], s[3]);
+    let arr5 = ops::reshape(arr, &[b, n_kv, 1, t, d]).map_err(mlx_err)?;
+    let bcast = ops::broadcast_to(&arr5, &[b, n_kv, n_repeat, t, d]).map_err(mlx_err)?;
+    ops::reshape(&bcast, &[b, n_kv * n_repeat, t, d]).map_err(mlx_err)
+}
+
+// ── Block forward ────────────────────────────────────────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+fn block_forward(
+    x: &Array,
+    weights: &HashMap<String, Array>,
+    layer: usize,
+    config: &LlamaConfig,
+    cache: &mut Option<(Array, Array)>,
+    offset: i32,
+) -> Result<Array> {
+    let p = format!("model.layers.{layer}");
+    let in_norm_w = get(weights, &format!("{p}.input_layernorm.weight"))?;
+    let post_norm_w = get(weights, &format!("{p}.post_attention_layernorm.weight"))?;
+    let q_w = get(weights, &format!("{p}.self_attn.q_proj.weight"))?;
+    let k_w = get(weights, &format!("{p}.self_attn.k_proj.weight"))?;
+    let v_w = get(weights, &format!("{p}.self_attn.v_proj.weight"))?;
+    let o_w = get(weights, &format!("{p}.self_attn.o_proj.weight"))?;
+    let gate_w = get(weights, &format!("{p}.mlp.gate_proj.weight"))?;
+    let up_w = get(weights, &format!("{p}.mlp.up_proj.weight"))?;
+    let down_w = get(weights, &format!("{p}.mlp.down_proj.weight"))?;
+
+    let n_heads = config.num_attention_heads;
+    let n_kv = config.n_kv_heads();
+    let head_dim = config.head_dim();
+    let n_repeat = n_heads / n_kv;
+
+    // ── Self-attention ────────────────────────────────────────────────
+    let h = rms_norm(x, in_norm_w, config.rms_norm_eps)?;
+
+    // Project to Q/K/V: (B, T, n_heads*head_dim) etc.
+    let q = linear(&h, q_w)?;
+    let k = linear(&h, k_w)?;
+    let v = linear(&h, v_w)?;
+
+    let (b, t) = (q.shape()[0], q.shape()[1]);
+
+    // Reshape to (B, T, n_heads, head_dim) → transpose to (B, n_heads, T, head_dim)
+    let q = ops::reshape(&q, &[b, t, n_heads, head_dim]).map_err(mlx_err)?;
+    let q = ops::transpose_axes(&q, &[0, 2, 1, 3]).map_err(mlx_err)?;
+    let k = ops::reshape(&k, &[b, t, n_kv, head_dim]).map_err(mlx_err)?;
+    let k = ops::transpose_axes(&k, &[0, 2, 1, 3]).map_err(mlx_err)?;
+    let v = ops::reshape(&v, &[b, t, n_kv, head_dim]).map_err(mlx_err)?;
+    let v = ops::transpose_axes(&v, &[0, 2, 1, 3]).map_err(mlx_err)?;
+
+    // Apply RoPE at the cache offset.
+    let q = fast::rope(
+        &q,
+        head_dim,
+        false,
+        Some(config.rope_theta),
+        1.0,
+        offset,
+        None::<&Array>,
+    )
+    .map_err(mlx_err)?;
+    let k = fast::rope(
+        &k,
+        head_dim,
+        false,
+        Some(config.rope_theta),
+        1.0,
+        offset,
+        None::<&Array>,
+    )
+    .map_err(mlx_err)?;
+
+    // Concatenate with KV cache.
+    let (k, v) = match cache.take() {
+        Some((prev_k, prev_v)) => {
+            let new_k = ops::concatenate_axis(&[&prev_k, &k], 2).map_err(mlx_err)?;
+            let new_v = ops::concatenate_axis(&[&prev_v, &v], 2).map_err(mlx_err)?;
+            (new_k, new_v)
+        }
+        None => (k, v),
+    };
+    *cache = Some((k.clone(), v.clone()));
+
+    // GQA expansion to match n_heads.
+    let k = repeat_kv(&k, n_repeat)?;
+    let v = repeat_kv(&v, n_repeat)?;
+
+    // Scaled dot-product attention.
+    let scale = (head_dim as f32).sqrt().recip();
+    let kt = ops::transpose_axes(&k, &[0, 1, 3, 2]).map_err(mlx_err)?;
+    let scores = ops::matmul(&q, &kt).map_err(mlx_err)?;
+    let scores = ops::multiply(&scores, Array::from_f32(scale)).map_err(mlx_err)?;
+
+    // Causal mask (additive). Uses the score dtype so addition broadcasts.
+    let t_k = scores.shape()[3];
+    let mask = build_causal_mask(t, t_k, scores.dtype())?;
+    let scores = ops::add(&scores, &mask).map_err(mlx_err)?;
+
+    let attn = ops::softmax_axis(&scores, -1, false).map_err(mlx_err)?;
+    let attn = ops::matmul(&attn, &v).map_err(mlx_err)?;
+    let attn = ops::transpose_axes(&attn, &[0, 2, 1, 3]).map_err(mlx_err)?;
+    let attn = ops::reshape(&attn, &[b, t, n_heads * head_dim]).map_err(mlx_err)?;
+    let attn_out = linear(&attn, o_w)?;
+
+    let x = ops::add(x, &attn_out).map_err(mlx_err)?;
+
+    // ── SwiGLU MLP ────────────────────────────────────────────────────
+    let h2 = rms_norm(&x, post_norm_w, config.rms_norm_eps)?;
+    let gate = linear(&h2, gate_w)?;
+    // SiLU = x * sigmoid(x)
+    let gate_sig = ops::sigmoid(&gate).map_err(mlx_err)?;
+    let gate_silu = ops::multiply(&gate, &gate_sig).map_err(mlx_err)?;
+    let up = linear(&h2, up_w)?;
+    let mlp = ops::multiply(&gate_silu, &up).map_err(mlx_err)?;
+    let mlp_out = linear(&mlp, down_w)?;
+
+    ops::add(&x, &mlp_out).map_err(mlx_err)
+}
+
+fn get<'a>(map: &'a HashMap<String, Array>, key: &str) -> Result<&'a Array> {
+    map.get(key)
+        .ok_or_else(|| Error::MlxUnavailable(format!("missing weight {key}")))
 }
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -127,10 +324,6 @@ fn load_weights(path: &Path) -> Result<HashMap<String, Array>> {
 pub struct MlxModel {
     pub config: LlamaConfig,
     pub tokenizer: Tokenizer,
-    /// Raw weights keyed by their HuggingFace tensor names (e.g.
-    /// `model.layers.0.self_attn.q_proj.weight`). Held as-is so the actual
-    /// transformer body can be filled in incrementally without touching
-    /// the loader.
     pub weights: HashMap<String, Array>,
 }
 
@@ -162,33 +355,52 @@ impl MlxModel {
         })
     }
 
-    /// Token ids → forward pass → next-token logits. Implementation pending —
-    /// see module-level docstring. Once filled in, the rest of
-    /// [`MlxModel::generate`] needs no further changes.
-    fn forward_step(&self, _input_ids: &[u32], _kv_cache: &mut KvCache) -> Result<Vec<f32>> {
-        // TODO: implement Llama-style forward pass using `self.weights`:
-        //   1. embed = take(weights["model.embed_tokens.weight"], input_ids)
-        //   2. for each layer i:
-        //        a. h = rms_norm(embed, weights[f"...layer{i}.input_layernorm.weight"])
-        //        b. q = h @ q_proj.T;  k = h @ k_proj.T;  v = h @ v_proj.T
-        //        c. q, k = rope(q, k, theta=config.rope_theta)
-        //        d. append k, v to kv_cache; expand kv heads if GQA
-        //        e. attn = softmax((q @ k.T) / sqrt(head_dim)) @ v   [+ causal mask]
-        //        f. attn_out = attn @ o_proj.T
-        //        g. x = embed + attn_out
-        //        h. h2 = rms_norm(x, post_attn_norm)
-        //        i. mlp = (silu(h2 @ gate_proj.T) * (h2 @ up_proj.T)) @ down_proj.T
-        //        j. embed = x + mlp
-        //   3. logits = rms_norm(embed, model.norm.weight) @ lm_head.weight.T
-        //   4. return logits[-1, :]
-        // mlx-rs APIs to use: ops::matmul, ops::softmax_axis, fast::rope,
-        // nn::silu, ops::take_axis, ops::concatenate_axis, ops::reshape,
-        // ops::transpose_axes, ops::tri_axes (causal mask).
-        Err(Error::MlxUnavailable(
-            "transformer forward pass not yet implemented; \
-             see edge/mlx-runtime/src/mlx.rs forward_step TODO"
-                .into(),
-        ))
+    /// One forward pass at `offset` cached tokens. `input_ids` has shape `[T]`;
+    /// returns the logits for the **last** position as `Vec<f32>` of length
+    /// `vocab_size`.
+    fn forward_step(
+        &self,
+        input_ids: &[u32],
+        cache: &mut KvCache,
+        offset: i32,
+    ) -> Result<Vec<f32>> {
+        // Build (1, T) i32 input.
+        let ids_i32: Vec<i32> = input_ids.iter().map(|&v| v as i32).collect();
+        let tokens = Array::from_slice(&ids_i32, &[1, ids_i32.len() as i32]);
+
+        // Embed: take rows from embed_tokens.weight indexed by tokens.
+        let embed_w = get(&self.weights, "model.embed_tokens.weight")?;
+        let mut x = ops::indexing::take_axis(embed_w, &tokens, 0).map_err(mlx_err)?;
+        // take_axis along axis 0 with index shape (1, T) yields (1, T, hidden).
+        // Confirm shape: should already be (1, T, hidden_size); no reshape needed.
+
+        // Cast embed_w-derived x to match weight dtype if necessary. For F32
+        // weights everything stays F32. For F16/BF16, mlx does the cast in
+        // each op as needed; we keep x in the model's native dtype.
+
+        for layer in 0..self.config.num_hidden_layers as usize {
+            x = block_forward(
+                &x,
+                &self.weights,
+                layer,
+                &self.config,
+                &mut cache.layers[layer],
+                offset,
+            )?;
+        }
+
+        let final_norm_w = get(&self.weights, "model.norm.weight")?;
+        let x = rms_norm(&x, final_norm_w, self.config.rms_norm_eps)?;
+
+        let lm_head_w = get(&self.weights, "lm_head.weight")?;
+        let logits = linear(&x, lm_head_w)?;
+        // logits: (1, T, vocab_size) — take last position.
+        let last_idx = Array::from_int(logits.shape()[1] - 1);
+        let last = ops::indexing::take_axis(&logits, &last_idx, 1).map_err(mlx_err)?;
+        // Result is (1, vocab_size); cast to f32 + flatten.
+        let last_f32 = last.as_dtype(Dtype::Float32).map_err(mlx_err)?;
+        let flat = ops::reshape(&last_f32, &[self.config.vocab_size]).map_err(mlx_err)?;
+        Ok(flat.as_slice::<f32>().to_vec())
     }
 
     fn sample_argmax(logits: &[f32]) -> u32 {
@@ -220,8 +432,8 @@ impl MlxModel {
         let mut cache = KvCache::new(self.config.num_hidden_layers as usize);
         let mut acc = String::new();
 
-        // Prefill with the entire prompt.
-        let logits = self.forward_step(&prompt_ids, &mut cache)?;
+        // Prefill
+        let logits = self.forward_step(&prompt_ids, &mut cache, 0)?;
         let mut next_id = Self::sample_argmax(&logits);
 
         let cap = max_new.min(self.config.max_position_embeddings as usize);
@@ -236,33 +448,12 @@ impl MlxModel {
             acc.push_str(&piece);
             on_token(&piece, false);
 
-            let logits = self.forward_step(&[next_id], &mut cache)?;
+            let offset = cache.position();
+            let logits = self.forward_step(&[next_id], &mut cache, offset)?;
             next_id = Self::sample_argmax(&logits);
         }
         on_token("", true);
         Ok(acc)
-    }
-}
-
-// ── KV cache ─────────────────────────────────────────────────────────────────
-
-/// Per-layer key/value cache. Each entry grows along the sequence axis as
-/// new tokens stream in.
-pub struct KvCache {
-    pub layers: Vec<Option<(Array, Array)>>,
-}
-
-impl KvCache {
-    pub fn new(n_layers: usize) -> Self {
-        Self {
-            layers: (0..n_layers).map(|_| None).collect(),
-        }
-    }
-
-    pub fn reset(&mut self) {
-        for slot in &mut self.layers {
-            *slot = None;
-        }
     }
 }
 
@@ -307,11 +498,6 @@ fn require_keys(weights: &HashMap<String, Array>, keys: &[String]) -> Result<()>
 
 // ── Inference impl ────────────────────────────────────────────────────────────
 
-/// MLX-backed [`Inference`] implementation.
-///
-/// Constructed via [`MlxInference::new`] pointing at a model directory. The
-/// model is loaded lazily on the first request and reused for the lifetime of
-/// the handle, guarded by a [`Mutex`].
 pub struct MlxInference {
     model_dir: PathBuf,
     model: Arc<Mutex<Option<MlxModel>>>,

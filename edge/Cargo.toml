@@ -5,7 +5,10 @@ members = ["sync-client", "desktop-bindings", "edge-store", "offline-queue", "ol
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.81"
+# 1.88 is the floor: the tauri 2.x transitive graph (image, plist, time,
+# serde_with, icu_*) plus toml_parser's edition2024 feature collectively
+# require rustc 1.88.
+rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/ramsanjiev/Lucifer"
 
