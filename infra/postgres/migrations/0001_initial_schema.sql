@@ -37,6 +37,15 @@ CREATE TABLE telemetry_events (
 -- Convert to TimescaleDB hypertable partitioned by timestamp
 SELECT create_hypertable('telemetry_events', 'timestamp', chunk_time_interval => INTERVAL '1 day');
 
+-- Enable compression (columnstore) on the hypertable. Required since
+-- TimescaleDB 2.18 before add_compression_policy can attach — older releases
+-- enabled it implicitly. Segment by agent_id, order by time for query locality.
+ALTER TABLE telemetry_events SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'agent_id',
+    timescaledb.compress_orderby = 'timestamp DESC'
+);
+
 -- Compression policy: compress chunks older than 30 days
 SELECT add_compression_policy('telemetry_events', INTERVAL '30 days');
 
