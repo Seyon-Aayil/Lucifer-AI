@@ -78,7 +78,8 @@ jobs:
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: testpassword
       APP_ENV: test
-      APP_SECRET_KEY: test-secret-key-for-ci
+      # Settings.app_secret_key requires min_length=32.
+      APP_SECRET_KEY: ci-integration-secret-key-0123456789abcdef
 
     steps:
       - uses: actions/checkout@v4
