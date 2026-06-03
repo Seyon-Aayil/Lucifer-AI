@@ -54,7 +54,7 @@ async def _check_redis(url: str) -> dict[str, Any]:
     """Verify Redis connectivity."""
     start = time.monotonic()
     try:
-        client = redis_from_url(url)
+        client = redis_from_url(url)  # type: ignore[no-untyped-call]
         await asyncio.wait_for(client.ping(), timeout=2.0)
         await client.aclose()
         return {"status": "ok", "latency_ms": round((time.monotonic() - start) * 1000, 1)}
@@ -92,13 +92,14 @@ async def readiness(request: Request) -> dict[str, Any]:
     settings = get_settings()
 
     # Run all checks in parallel
-    postgres_check, neo4j_check, redis_check, litellm_check = await asyncio.gather(
+    checks: list[Any] = await asyncio.gather(
         _check_postgres(settings.database_url),
         _check_neo4j(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password),
         _check_redis(settings.redis_url),
         _check_litellm(settings.litellm_proxy_url),
         return_exceptions=True,
     )
+    postgres_check, neo4j_check, redis_check, litellm_check = checks
 
     # NATS is checked via app.state
     nats_status: dict[str, Any]

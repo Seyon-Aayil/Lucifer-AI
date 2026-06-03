@@ -91,9 +91,7 @@ def test_content_monotonic_in_length():
 def test_score_articles_returns_descending():
     now = datetime(2026, 1, 1, tzinfo=UTC)
     fresh = _article(url="https://a/1", body="x" * 5000, published_at=now)
-    stale = _article(
-        url="https://a/2", body="short", published_at=now - timedelta(hours=72)
-    )
+    stale = _article(url="https://a/2", body="short", published_at=now - timedelta(hours=72))
     scored = _score_articles([stale, fresh], now)
     # Fresh + long body should outrank stale + short
     assert scored[0][0].url == "https://a/1"

@@ -12,7 +12,6 @@ from master.core.auth.device_pairing import (
     _is_valid_format,
 )
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 

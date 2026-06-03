@@ -25,7 +25,7 @@ from __future__ import annotations
 import base64
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -39,8 +39,10 @@ from master.core.auth.jwt import create_access_token, create_refresh_token
 from master.core.auth.operator import (
     InvalidCredentialsError,
     is_operator_login_configured,
-    login as operator_login,
     validate_operator_session,
+)
+from master.core.auth.operator import (
+    login as operator_login,
 )
 from master.core.auth.rate_limit import FixedWindowRateLimiter
 from master.core.auth.revocation import RevocationStore
@@ -200,7 +202,7 @@ def _client_ip(request: Request) -> str:
     return "unknown"
 
 
-def _require_admin(authorization: Annotated[str | None, Header()] = None) -> dict:
+def _require_admin(authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
     """
     Operator gate. Order of preference:
 
@@ -282,7 +284,7 @@ async def admin_login(body: OperatorLoginRequest) -> OperatorLoginResponse:
     summary="Inspect the current operator session.",
 )
 async def admin_whoami(
-    payload: Annotated[dict, Depends(_require_admin)],
+    payload: Annotated[dict[str, Any], Depends(_require_admin)],
 ) -> OperatorWhoamiResponse:
     return OperatorWhoamiResponse(
         username=str(payload.get("sub", "")),

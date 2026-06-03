@@ -11,7 +11,6 @@ from master.agents.librarian.access_control import (
 )
 from master.core.exceptions import PermissionDeniedError
 
-
 # ── Librarian bypass ──────────────────────────────────────────────────────────
 
 

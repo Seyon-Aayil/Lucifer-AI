@@ -211,10 +211,7 @@ def _peer_cert_serial(context) -> int | None:
     if not pem_chain:
         return None
     pem = pem_chain[0] if isinstance(pem_chain, list) else pem_chain
-    if isinstance(pem, bytes):
-        pem_bytes = pem
-    else:
-        pem_bytes = str(pem).encode()
+    pem_bytes = pem if isinstance(pem, bytes) else str(pem).encode()
     try:
         from cryptography import x509  # local import to keep grpc-only callers happy
 

@@ -9,7 +9,6 @@ import pytest
 from master.agents.base.agent import MemoryDelta
 from master.agents.librarian.memory_writer import MemoryWriter, _delta_to_text
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 

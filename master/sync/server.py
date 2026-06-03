@@ -13,6 +13,7 @@ Master-side deltas (Librarian writes since the device's last_seen vector clock)
 are published to NATS `sync.edge.<device_id>` for fan-out; this servicer also
 streams them back inline.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -115,7 +116,9 @@ class LuciferSyncServicer(_Base):
                 # Process edge deltas
                 for edge_delta in msg.edge_deltas:
                     candidate = candidate_from_edge_delta(edge_delta, msg.vector_clock)
-                    existing = await self._fetch_edge_candidate(edge_delta.edge_id, msg.vector_clock)
+                    existing = await self._fetch_edge_candidate(
+                        edge_delta.edge_id, msg.vector_clock
+                    )
                     winner, audit_rec = self._resolver.resolve(candidate, existing)
                     if winner.record_id == edge_delta.edge_id:
                         await self._apply_edge(edge_delta)
@@ -151,7 +154,9 @@ class LuciferSyncServicer(_Base):
         caller = current_caller.get()
         device_id = caller.device_id if caller else request.device_id
 
-        with tracer.start_as_current_span("grpc.get_hot_subgraph", attributes={"device_id": device_id}):
+        with tracer.start_as_current_span(
+            "grpc.get_hot_subgraph", attributes={"device_id": device_id}
+        ):
             log.info("sync.hot_subgraph.requested", device_id=device_id)
             manifest = await self._hot_subgraph.build(
                 device_id=device_id,
@@ -232,11 +237,14 @@ class LuciferSyncServicer(_Base):
         incoming = candidate_from_node_delta(delta)
         # Patch vector_clock from enclosing SyncMessage (not on NodeDelta itself)
         from dataclasses import replace
+
         incoming = replace(incoming, vector_clock=vector_clock)
         existing = await self._fetch_node_candidate(delta.node_id, vector_clock)
         return self._resolver.resolve(incoming, existing)
 
-    async def _fetch_node_candidate(self, node_id: str, fallback_clock: int) -> DeltaCandidate | None:
+    async def _fetch_node_candidate(
+        self, node_id: str, fallback_clock: int
+    ) -> DeltaCandidate | None:
         try:
             props = await self._graph.get_node(node_id)
             return DeltaCandidate(
@@ -252,7 +260,9 @@ class LuciferSyncServicer(_Base):
         except Exception:
             return None
 
-    async def _fetch_edge_candidate(self, edge_id: str, fallback_clock: int) -> DeltaCandidate | None:
+    async def _fetch_edge_candidate(
+        self, edge_id: str, fallback_clock: int
+    ) -> DeltaCandidate | None:
         return None  # edges don't have a simple lookup yet; treat all as new
 
     async def _apply_node(self, winner: DeltaCandidate, delta: Any) -> None:

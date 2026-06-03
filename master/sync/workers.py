@@ -9,6 +9,7 @@ Each message carries a JSON payload: {device_id, node_ids, edge_ids}.
 
 The worker is a long-running asyncio task started by the FastAPI lifespan.
 """
+
 from __future__ import annotations
 
 import asyncio

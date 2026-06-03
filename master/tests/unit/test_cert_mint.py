@@ -14,7 +14,6 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from master.core.auth.cert_mint import mint_client_credentials
 from master.core.config import get_settings
 
-
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 
