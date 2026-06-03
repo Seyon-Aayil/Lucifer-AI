@@ -35,7 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: timescale/timescaledb:latest-pg16
+        # -ha image bundles pgvector + timescaledb (the plain image lacks pgvector)
+        image: timescale/timescaledb-ha:pg16
         env:
           POSTGRES_DB: lucifer
           POSTGRES_USER: lucifer

@@ -6,7 +6,9 @@
 
 -- ── Extensions ───────────────────────────────────────────────────────────────
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgvector";
+-- pgvector registers its extension under the name "vector" (control file
+-- vector.control); "pgvector" is not a valid extension name.
+CREATE EXTENSION IF NOT EXISTS "vector";
 CREATE EXTENSION IF NOT EXISTS "timescaledb" CASCADE;
 
 -- ── Enums ────────────────────────────────────────────────────────────────────
