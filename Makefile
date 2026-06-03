@@ -37,7 +37,9 @@ migrate: ## Run all pending migrations (Postgres + Neo4j)
 	./infra/neo4j/migrate.sh
 
 migrate-new: ## Create a new Alembic migration (usage: make migrate-new MSG="description")
-	cd master && python -m alembic revision --autogenerate -m "$(MSG)"
+	@# No ORM metadata is wired (target_metadata=None), so this produces an empty
+	@# revision scaffold to fill in by hand. Migrations are explicit by design.
+	cd master && python -m alembic revision -m "$(MSG)"
 
 # ─── Code Generation ────────────────────────────────────────────────────────
 proto: ## Generate gRPC stubs from proto files
