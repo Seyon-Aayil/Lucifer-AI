@@ -75,7 +75,7 @@ class SpendTracker:
             return  # No limit configured — allow (but log)
 
         key = _daily_key(agent_id)
-        raw: bytes | None = await self._redis.get(key)
+        raw: bytes | str | None = await self._redis.get(key)
         current = float(raw) if raw else 0.0
 
         if current + estimated_cost > limit:
@@ -88,7 +88,7 @@ class SpendTracker:
     async def get_daily_spend(self, agent_id: str) -> float:
         """Return the current daily spend for an agent."""
         key = _daily_key(agent_id)
-        raw: bytes | None = await self._redis.get(key)
+        raw: bytes | str | None = await self._redis.get(key)
         return float(raw) if raw else 0.0
 
     async def flush_to_timescaledb(self) -> None:

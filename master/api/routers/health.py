@@ -54,7 +54,7 @@ async def _check_redis(url: str) -> dict[str, Any]:
     """Verify Redis connectivity."""
     start = time.monotonic()
     try:
-        client = redis_from_url(url)  # type: ignore[no-untyped-call]
+        client = redis_from_url(url)
         await asyncio.wait_for(client.ping(), timeout=2.0)
         await client.aclose()
         return {"status": "ok", "latency_ms": round((time.monotonic() - start) * 1000, 1)}

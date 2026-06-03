@@ -307,7 +307,7 @@ def build_graph(checkpointer: Any = None) -> Any:
     graph.add_node("context_inject", context_inject_node)
     graph.add_node("budget_plan", budget_plan_node)
     graph.add_node("route", route_node)
-    graph.add_node("execute", execute_node)
+    graph.add_node("execute", execute_node)  # type: ignore[arg-type]
     graph.add_node("hitl", hitl_node)
     graph.add_node("synthesize", synthesize_node)
     graph.add_node("memory_write", memory_write_node)

@@ -83,6 +83,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space
+        run: |
+          # The full .[dev] install pulls torch + nvidia CUDA wheels (~5GB) and
+          # the timescaledb-ha image is large; the default runner runs out of
+          # disk. Reclaim ~25GB of preinstalled toolchains we don't use.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:

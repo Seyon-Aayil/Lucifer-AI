@@ -164,7 +164,7 @@ def _redis_dep(request: Request) -> Redis:
 
         redis = _Redis.from_url(get_settings().redis_url)
         request.app.state.redis = redis
-    return redis  # type: ignore[no-any-return]
+    return redis
 
 
 def _pairing_store(redis: Annotated[Redis, Depends(_redis_dep)]) -> PairingCodeStore:

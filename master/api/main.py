@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
     pg_checkpointer = AsyncPostgresSaver.from_conn_string(settings.database_url)
-    await pg_checkpointer.setup()  # creates checkpoint tables if not present
+    await pg_checkpointer.setup()  # type: ignore[attr-defined]  # creates checkpoint tables if not present
     app.state.graph = build_graph(checkpointer=pg_checkpointer)
     app.state.pg_checkpointer = pg_checkpointer
     log.info("langgraph_checkpointer.ready", backend="postgres")
@@ -150,7 +150,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     scheduler.shutdown(wait=False)
     if hasattr(app.state, "news_scheduler"):
         await app.state.news_scheduler.close()
-    await pg_checkpointer.conn.close()
+    await pg_checkpointer.conn.close()  # type: ignore[attr-defined]
     await graph_client.close()
     await mcp_registry.disconnect_all()
     await nc.drain()
