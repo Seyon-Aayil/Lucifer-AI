@@ -114,4 +114,13 @@ jobs:
           "
 
       - name: Run integration tests
-        run: pytest master/tests/integration/ -v -m "integration"
+        run: |
+          # Clear the repo-wide coverage gate (addopts) — it's meaningful for the
+          # unit suite, not this DB-bootstrap job. Tolerate exit code 5 (no tests
+          # collected) so the empty integration suite doesn't fail the build.
+          pytest master/tests/integration/ -v -m "integration" --override-ini="addopts=" || code=$?
+          if [ "${code:-0}" -eq 5 ]; then
+            echo "No integration tests collected yet — DB bootstrap validated, skipping."
+            exit 0
+          fi
+          exit "${code:-0}"
