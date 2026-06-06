@@ -32,6 +32,7 @@ from master.mcp.audit import AuditLogger
 from master.mcp.registry import MCPServerRegistry
 from master.news.scheduler import NewsScheduler
 from master.orchestrator.graph import build_graph
+from master.sync.agent_worker import AgentTaskWorker, make_orchestrator_dispatch
 from master.sync.runtime import start_grpc_server
 from master.sync.workers import SyncDeltaWorker
 from master.token_optimizer.spend_tracker import SpendTracker
@@ -140,12 +141,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         sync_worker = SyncDeltaWorker(nats_js=js, audit_logger=audit_logger)
         sync_worker.start()
         app.state.sync_worker = sync_worker
+
+        # Execute offline actions flushed by edge devices: consume agent.task.>,
+        # run each through the orchestrator, publish the result back.
+        agent_worker = AgentTaskWorker(
+            nats_js=js,
+            dispatch=make_orchestrator_dispatch(app.state.graph),
+            audit_logger=audit_logger,
+        )
+        agent_worker.start()
+        app.state.agent_worker = agent_worker
         log.info("grpc_sync.ready", addr=settings.grpc_bind_addr)
 
     yield  # ── Application is running ────────────────────────────────────────
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     log.info("lucifer.shutdown")
+    if hasattr(app.state, "agent_worker"):
+        await app.state.agent_worker.stop()
     if hasattr(app.state, "sync_worker"):
         await app.state.sync_worker.stop()
     if hasattr(app.state, "grpc_server"):
