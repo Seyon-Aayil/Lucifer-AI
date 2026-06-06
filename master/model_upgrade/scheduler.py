@@ -34,6 +34,27 @@ GenerateFn = Callable[[str, str], Awaitable[str]]
 _REDIS_STRONG_KEY = "lucifer:model:strong"
 
 
+async def apply_persisted_strong_model(registry: Any, redis: Any) -> str | None:
+    """
+    On startup, re-apply a previously promoted strong model persisted in Redis so
+    a promotion survives restarts. Returns the applied model id, or None if there
+    is no override (or it already matches). Best-effort: never raises.
+    """
+    try:
+        raw = await redis.get(_REDIS_STRONG_KEY)
+    except Exception as exc:  # noqa: BLE001 — startup must not fail on this
+        log.warning("model_upgrade.override_read_failed", error=str(exc))
+        return None
+    if not raw:
+        return None
+    model_id = raw.decode() if isinstance(raw, bytes | bytearray) else str(raw)
+    if model_id == registry.strong_model_id:
+        return None
+    registry.set_strong_model(model_id)
+    log.info("model_upgrade.override_applied", model_id=model_id)
+    return model_id
+
+
 def make_litellm_generate(settings: Any) -> GenerateFn:
     """
     Build a GenerateFn that calls a specific model through the LiteLLM proxy.

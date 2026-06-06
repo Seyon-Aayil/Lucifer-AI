@@ -163,10 +163,18 @@ function Pair({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
     try {
       const codeStr = code.join("");
       const httpEndpoint = endpoint.replace(/^grpc/, "http");
+      // Stable per-install id: reuse the persisted one, or mint + persist a uuid
+      // on first pair so the device keeps a consistent identity across re-pairs.
+      const settings = await ipc.getSettings();
+      const installId =
+        settings.device_id || (crypto.randomUUID?.() ?? `device-${Date.now()}`);
+      if (!settings.device_id) {
+        await ipc.updateSettings({ ...settings, device_id: installId });
+      }
       const res = await fetch(`${httpEndpoint}/devices/pair`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code: codeStr, device_id: "device-mac-01" }),
+        body: JSON.stringify({ code: codeStr, device_id: installId }),
       });
       if (!res.ok) {
         const detail = await res.text();

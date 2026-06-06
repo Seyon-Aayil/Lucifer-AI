@@ -6,7 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 from master.llm.registry import ProviderRegistry, reset_shared_registry, shared_registry
 from master.model_upgrade.golden import GoldenTask, substring_score_fn
-from master.model_upgrade.scheduler import ModelUpgradeScheduler
+from master.model_upgrade.scheduler import (
+    ModelUpgradeScheduler,
+    apply_persisted_strong_model,
+)
 from master.model_upgrade.types import PromotionDecision
 
 _TASKS = [
@@ -113,3 +116,34 @@ class TestRegistryActivation:
         reset_shared_registry()
         assert shared_registry() is not a
         reset_shared_registry()
+
+
+class TestPersistedOverride:
+    async def test_applies_override_from_redis(self):
+        reg = _registry("incumbent-1")
+        redis = AsyncMock()
+        redis.get = AsyncMock(return_value=b"promoted-2")
+        applied = await apply_persisted_strong_model(reg, redis)
+        assert applied == "promoted-2"
+        reg.set_strong_model.assert_called_once_with("promoted-2")
+
+    async def test_no_override_is_noop(self):
+        reg = _registry("incumbent-1")
+        redis = AsyncMock()
+        redis.get = AsyncMock(return_value=None)
+        assert await apply_persisted_strong_model(reg, redis) is None
+        reg.set_strong_model.assert_not_called()
+
+    async def test_matching_override_is_noop(self):
+        reg = _registry("incumbent-1")
+        redis = AsyncMock()
+        redis.get = AsyncMock(return_value=b"incumbent-1")
+        assert await apply_persisted_strong_model(reg, redis) is None
+        reg.set_strong_model.assert_not_called()
+
+    async def test_redis_failure_is_swallowed(self):
+        reg = _registry("incumbent-1")
+        redis = AsyncMock()
+        redis.get = AsyncMock(side_effect=RuntimeError("down"))
+        assert await apply_persisted_strong_model(reg, redis) is None
+        reg.set_strong_model.assert_not_called()
