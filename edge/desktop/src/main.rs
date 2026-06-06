@@ -53,7 +53,10 @@ fn main() {
 }
 
 fn is_overlay_shortcut(s: &Shortcut) -> bool {
-    let (mods, code) = OVERLAY_BINDING.get().copied().unwrap_or((Modifiers::SUPER, Code::Space));
+    let (mods, code) = OVERLAY_BINDING
+        .get()
+        .copied()
+        .unwrap_or((Modifiers::SUPER, Code::Space));
     s.matches(mods, code)
 }
 
@@ -154,7 +157,10 @@ fn parse_key(token: &str) -> Option<Code> {
 }
 
 fn register_overlay_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let (mods, code) = OVERLAY_BINDING.get().copied().unwrap_or((Modifiers::SUPER, Code::Space));
+    let (mods, code) = OVERLAY_BINDING
+        .get()
+        .copied()
+        .unwrap_or((Modifiers::SUPER, Code::Space));
     let shortcut = Shortcut::new(Some(mods), code);
     if let Err(e) = app.global_shortcut().register(shortcut) {
         tracing::warn!(error = %e, "could not register overlay hotkey — another app may own it");
