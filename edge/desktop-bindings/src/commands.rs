@@ -100,6 +100,38 @@ pub async fn get_hot_subgraph(
         .await
 }
 
+/// Pull + clear agent-task results the master executed for this device.
+pub async fn get_pending_results(
+    handle: &ClientHandle,
+    device_id: String,
+    max_results: i32,
+) -> Result<serde_json::Value, ConnectError> {
+    handle
+        .with_mut(|client| {
+            Box::pin(async move {
+                let req = lucifer_sync_client::proto::ResultRequest {
+                    device_id,
+                    max_results,
+                };
+                let resp = client.get_pending_results(req).await?;
+                let results: Vec<serde_json::Value> = resp
+                    .results
+                    .into_iter()
+                    .map(|r| {
+                        serde_json::json!({
+                            "task_id": r.task_id,
+                            "agent_id": r.agent_id,
+                            "final_output": r.final_output,
+                            "completed_at": r.completed_at,
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::Value::Array(results))
+            })
+        })
+        .await
+}
+
 // ── Edge store ───────────────────────────────────────────────────────────────
 
 pub async fn open_edge_store(handle: &EdgeStoreHandle, path: String) -> Result<(), ConnectError> {
@@ -532,6 +564,15 @@ pub mod __handlers {
     }
 
     #[tauri::command]
+    pub async fn get_pending_results(
+        handle: State<'_, ClientHandle>,
+        device_id: String,
+        max_results: i32,
+    ) -> Result<serde_json::Value, ConnectError> {
+        super::get_pending_results(handle.inner(), device_id, max_results).await
+    }
+
+    #[tauri::command]
     pub async fn push_telemetry(
         handle: State<'_, ClientHandle>,
         device_id: String,
@@ -749,6 +790,7 @@ pub mod __handlers {
                 $crate::commands::__handlers::disconnect,
                 $crate::commands::__handlers::is_connected,
                 $crate::commands::__handlers::get_hot_subgraph,
+                $crate::commands::__handlers::get_pending_results,
                 $crate::commands::__handlers::push_telemetry,
                 $crate::commands::__handlers::get_settings,
                 $crate::commands::__handlers::update_settings,

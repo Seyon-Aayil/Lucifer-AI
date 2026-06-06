@@ -157,6 +157,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             audit_logger=audit_logger,
             revocation_store=revocation_store,
             settings=settings,
+            redis=redis_client,
         )
         app.state.grpc_server = grpc_server
 
@@ -170,6 +171,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             nats_js=js,
             dispatch=make_orchestrator_dispatch(app.state.graph),
             audit_logger=audit_logger,
+            redis=redis_client,
         )
         agent_worker.start()
         app.state.agent_worker = agent_worker

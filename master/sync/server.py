@@ -35,7 +35,9 @@ from master.sync.conflict_resolver import (
 )
 from master.sync.hot_subgraph import HotSubgraphBuilder
 from master.sync.lucifer_sync_pb2 import (  # type: ignore[import]
+    AgentResult,
     PushAck,
+    ResultBatch,
     SubgraphResponse,
     SyncMessage,
 )
@@ -62,6 +64,7 @@ class LuciferSyncServicer(_Base):
         db_pool: Any,
         nats_js: Any,
         audit_logger: Any,
+        redis: Any = None,
     ) -> None:
         self._graph = graph_client
         self._telemetry_sink = TelemetrySink(db_pool)
@@ -69,6 +72,7 @@ class LuciferSyncServicer(_Base):
         self._resolver = ConflictResolver()
         self._js = nats_js
         self._audit = audit_logger
+        self._redis = redis
 
     # ── SyncStream ────────────────────────────────────────────────────────────
 
@@ -212,6 +216,47 @@ class LuciferSyncServicer(_Base):
             rejected_count=result.rejected,
             message=result.message,
         )
+
+    # ── GetPendingResults ─────────────────────────────────────────────────────
+
+    async def GetPendingResults(  # noqa: N802
+        self,
+        request: Any,
+        context: grpc.aio.ServicerContext,  # type: ignore[type-arg]
+    ) -> ResultBatch:
+        from master.sync.agent_worker import results_key
+
+        caller = current_caller.get()
+        device_id = caller.device_id if caller else request.device_id
+        if self._redis is None:
+            return ResultBatch(results=[])
+
+        key = results_key(device_id)
+        limit = request.max_results or 100
+        try:
+            raw = await self._redis.lrange(key, 0, limit - 1)
+            if raw:
+                await self._redis.delete(key)
+        except Exception as exc:  # noqa: BLE001 — best-effort pull
+            log.warning("sync.results.read_failed", device_id=device_id, error=str(exc))
+            return ResultBatch(results=[])
+
+        results = []
+        for item in raw:
+            try:
+                d = json.loads(item)
+            except (ValueError, TypeError):
+                continue
+            results.append(
+                AgentResult(
+                    task_id=str(d.get("task_id", "")),
+                    agent_id=str(d.get("agent_id", "")),
+                    final_output=str(d.get("final_output", "")),
+                    completed_at=int(d.get("completed_at", 0)),
+                )
+            )
+        log.debug("sync.results.pulled", device_id=device_id, count=len(results))
+        return ResultBatch(results=results)
 
     # ── Internals ─────────────────────────────────────────────────────────────
 

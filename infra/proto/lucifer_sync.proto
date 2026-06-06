@@ -18,6 +18,10 @@ service LuciferSync {
 
   // Push telemetry batch to master (fire-and-forget, at-least-once).
   rpc PushTelemetry(TelemetryBatch) returns (PushAck);
+
+  // Pull + clear agent-task results executed master-side for this device
+  // (the async completions of offline QueuedActions). Unary poll.
+  rpc GetPendingResults(ResultRequest) returns (ResultBatch);
 }
 
 // ── Sync Messages ─────────────────────────────────────────────────────────────
@@ -108,4 +112,21 @@ message PushAck {
   int32  accepted_count = 1;
   int32  rejected_count = 2;
   string message        = 3;
+}
+
+// ── Agent Results (async QueuedAction completions) ─────────────────────────────
+message ResultRequest {
+  string device_id = 1;
+  int32  max_results = 2;  // 0 = server default
+}
+
+message AgentResult {
+  string task_id      = 1;
+  string agent_id     = 2;
+  string final_output = 3;
+  int64  completed_at = 4;  // Unix ms
+}
+
+message ResultBatch {
+  repeated AgentResult results = 1;
 }

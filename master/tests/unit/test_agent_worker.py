@@ -67,6 +67,25 @@ class TestHandle:
         msg.ack.assert_awaited_once()
         msg.nak.assert_not_awaited()
 
+    async def test_buffers_result_to_redis_when_configured(self):
+        js = AsyncMock()
+        redis = AsyncMock()
+        dispatch = AsyncMock(
+            return_value={"task_id": "act-1", "agent_id": "a", "final_output": "hi"}
+        )
+        worker = AgentTaskWorker(js, dispatch, redis=redis)
+
+        msg = AsyncMock()
+        msg.data = _envelope("hello", device="dev-7")
+        await worker._handle(msg)
+
+        redis.lpush.assert_awaited_once()
+        key, body = redis.lpush.await_args.args
+        assert key == "lucifer:agent_results:dev-7"
+        assert json.loads(body)["final_output"] == "hi"
+        redis.ltrim.assert_awaited_once()
+        msg.ack.assert_awaited_once()
+
     async def test_nak_on_dispatch_error(self):
         js = AsyncMock()
         dispatch = AsyncMock(side_effect=RuntimeError("boom"))

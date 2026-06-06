@@ -105,6 +105,7 @@ async def grpc_env():
         db_pool=pg_pool,
         nats_js=nats_js,
         audit_logger=audit_logger,
+        redis=redis_client,
     )
     add_LuciferSyncServicer_to_server(servicer, server)
     port = server.add_insecure_port("127.0.0.1:0")
@@ -120,6 +121,7 @@ async def grpc_env():
             pg_pool=pg_pool,
             revocation_store=revocation_store,
             nats_js=nats_js,
+            redis=redis_client,
         )
     finally:
         await channel.close()
@@ -258,6 +260,36 @@ async def test_push_telemetry_writes_rows(grpc_env) -> None:
         "SELECT count(*) FROM telemetry_events WHERE device_id = $1", device
     )
     assert count == 2
+
+
+async def test_get_pending_results_pops_buffered(grpc_env) -> None:
+    import json as _json
+
+    from master.sync.agent_worker import results_key
+    from master.sync.lucifer_sync_pb2 import ResultRequest
+
+    device = f"{_ID_PREFIX}-results"
+    key = results_key(device)
+    await grpc_env.redis.delete(key)
+    await grpc_env.redis.lpush(
+        key,
+        _json.dumps(
+            {"task_id": "t-1", "agent_id": "coding", "final_output": "done", "completed_at": 1}
+        ),
+    )
+
+    resp = await grpc_env.stub.GetPendingResults(
+        ResultRequest(device_id=device), metadata=_md(device)
+    )
+    assert len(resp.results) == 1
+    assert resp.results[0].task_id == "t-1"
+    assert resp.results[0].final_output == "done"
+
+    # second pull is empty (list was cleared)
+    resp2 = await grpc_env.stub.GetPendingResults(
+        ResultRequest(device_id=device), metadata=_md(device)
+    )
+    assert len(resp2.results) == 0
 
 
 async def test_auth_rejects_missing_token(grpc_env) -> None:
