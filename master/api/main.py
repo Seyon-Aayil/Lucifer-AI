@@ -31,7 +31,11 @@ from master.core.telemetry import setup_telemetry
 from master.llm.registry import shared_registry
 from master.mcp.audit import AuditLogger
 from master.mcp.registry import MCPServerRegistry
-from master.model_upgrade.scheduler import ModelUpgradeScheduler, make_litellm_generate
+from master.model_upgrade.scheduler import (
+    ModelUpgradeScheduler,
+    apply_persisted_strong_model,
+    make_litellm_generate,
+)
 from master.news.scheduler import NewsScheduler
 from master.orchestrator.graph import build_graph
 from master.sync.agent_worker import AgentTaskWorker, make_orchestrator_dispatch
@@ -98,6 +102,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         news_scheduler.attach(scheduler)
         app.state.news_scheduler = news_scheduler
         log.info("news_scheduler.ready")
+
+    # Re-apply a previously promoted strong model (survives restarts).
+    await apply_persisted_strong_model(shared_registry(), redis_client)
 
     # Model-upgrade: nightly shadow-eval of candidate models against the
     # incumbent, promoting on the shared registry. Disabled when no candidates.
