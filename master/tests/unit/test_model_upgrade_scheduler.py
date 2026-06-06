@@ -1,0 +1,115 @@
+"""Unit tests for the model-upgrade scheduler + golden benchmark + activation."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock
+
+from master.llm.registry import ProviderRegistry, reset_shared_registry, shared_registry
+from master.model_upgrade.golden import GoldenTask, substring_score_fn
+from master.model_upgrade.scheduler import ModelUpgradeScheduler
+from master.model_upgrade.types import PromotionDecision
+
+_TASKS = [
+    GoldenTask("a", "Pa", "xa"),
+    GoldenTask("b", "Pb", "xb"),
+]
+
+
+def _registry(strong: str = "incumbent-1") -> MagicMock:
+    reg = MagicMock()
+    reg.strong_model_id = strong
+    reg.set_strong_model = MagicMock()
+    return reg
+
+
+def _make_generate(candidate: str):
+    answers = {"Pa": "xa", "Pb": "xb"}
+
+    async def gen(prompt: str, model_id: str) -> str:
+        if model_id == candidate:
+            return answers[prompt]  # candidate: always correct
+        # incumbent: correct on Pa only -> score 0.5
+        return answers[prompt] if prompt == "Pa" else "nope"
+
+    return gen
+
+
+class TestSubstringScore:
+    async def test_hit_and_miss(self):
+        score = substring_score_fn(_TASKS)
+        assert await score("Pa", "the answer is XA!") == 1.0
+        assert await score("Pa", "wrong") == 0.0
+        assert await score("unknown-prompt", "xa") == 0.0
+
+
+class TestRunCycle:
+    async def test_promotes_better_candidate(self):
+        reg = _registry("incumbent-1")
+        redis = AsyncMock()
+        sched = ModelUpgradeScheduler(
+            generate=_make_generate("cand-1"),
+            registry=reg,
+            redis=redis,
+            candidates=["cand-1"],
+            tasks=_TASKS,
+        )
+        outcomes = await sched.run_cycle()
+
+        assert len(outcomes) == 1
+        assert outcomes[0].decision is PromotionDecision.AUTO_PROMOTE
+        reg.set_strong_model.assert_called_once_with("cand-1")
+        redis.set.assert_awaited_once()
+        key, val = redis.set.await_args.args
+        assert val == "cand-1"
+
+    async def test_rejects_non_better_candidate(self):
+        reg = _registry("incumbent-1")
+
+        # candidate scores the same as incumbent (both correct on Pa only).
+        async def gen(prompt: str, model_id: str) -> str:
+            return "xa" if prompt == "Pa" else "nope"
+
+        sched = ModelUpgradeScheduler(
+            generate=gen, registry=reg, redis=AsyncMock(), candidates=["cand-1"], tasks=_TASKS
+        )
+        outcomes = await sched.run_cycle()
+
+        assert outcomes[0].decision is not PromotionDecision.AUTO_PROMOTE
+        reg.set_strong_model.assert_not_called()
+
+    async def test_skips_candidate_equal_to_incumbent(self):
+        reg = _registry("cand-1")
+        sched = ModelUpgradeScheduler(
+            generate=_make_generate("cand-1"),
+            registry=reg,
+            redis=AsyncMock(),
+            candidates=["cand-1"],
+            tasks=_TASKS,
+        )
+        outcomes = await sched.run_cycle()
+        assert outcomes == []
+        reg.set_strong_model.assert_not_called()
+
+    def test_attach_registers_cron_job(self):
+        sched = ModelUpgradeScheduler(generate=AsyncMock(), registry=_registry())
+        scheduler = MagicMock()
+        sched.attach(scheduler, cron="0 3 * * *")
+        scheduler.add_job.assert_called_once()
+        assert scheduler.add_job.call_args.kwargs["id"] == "model_upgrade"
+
+
+class TestRegistryActivation:
+    def test_set_strong_model_updates_routing_target(self):
+        reg = ProviderRegistry(providers=[], strong_model_id="old")
+        assert reg.strong_model_id == "old"
+        reg.set_strong_model("new")
+        assert reg.strong_model_id == "new"
+
+    def test_shared_registry_is_singleton(self):
+        reset_shared_registry()
+        a = shared_registry()
+        b = shared_registry()
+        assert a is b
+        reset_shared_registry()
+        assert shared_registry() is not a
+        reset_shared_registry()

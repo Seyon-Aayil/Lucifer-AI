@@ -64,6 +64,20 @@ class ProviderRegistry:
         # Lazy-loaded RouteLLM controller
         self._routellm: Any | None = None
 
+    @property
+    def strong_model_id(self) -> str:
+        """The provider id RouteLLM routes complex queries to."""
+        return self._strong_model_id
+
+    def set_strong_model(self, model_id: str) -> None:
+        """
+        Promote a model to the 'strong' tier at runtime — the activation hook
+        for the model-upgrade pipeline. Takes effect for subsequent `select`
+        calls on this instance.
+        """
+        log.info("llm.registry.strong_model_changed", old=self._strong_model_id, new=model_id)
+        self._strong_model_id = model_id
+
     @classmethod
     def from_settings(cls, extra_providers: list[LLMProvider] | None = None) -> ProviderRegistry:
         """
@@ -264,3 +278,24 @@ class ProviderRegistry:
         except Exception as exc:
             await self.report_failure(provider.provider_id, exc)
             raise ProviderError(str(exc), provider_id=provider.provider_id) from exc
+
+
+# ── Shared process-wide registry ─────────────────────────────────────────────
+# The orchestrator and the model-upgrade scheduler share one instance so that a
+# runtime `set_strong_model` (model promotion) takes effect for live routing.
+
+_shared_registry: ProviderRegistry | None = None
+
+
+def shared_registry() -> ProviderRegistry:
+    """Return the process-wide ProviderRegistry, building it on first use."""
+    global _shared_registry
+    if _shared_registry is None:
+        _shared_registry = ProviderRegistry.from_settings()
+    return _shared_registry
+
+
+def reset_shared_registry() -> None:
+    """Drop the cached shared registry (tests / explicit reload)."""
+    global _shared_registry
+    _shared_registry = None
