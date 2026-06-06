@@ -96,8 +96,8 @@ export const ipc = {
   isConnected:   () => invoke<boolean>("is_connected"),
   getHotSubgraph: (deviceId: string, lastSyncAtMs: number) =>
     invoke<SubgraphSummary>("get_hot_subgraph", { deviceId, lastSyncAtMs }),
-  pushTelemetry: (events: TelemetryEvent[]) =>
-    invoke<number>("push_telemetry", { events }),
+  pushTelemetry: (deviceId: string, events: TelemetryEvent[]) =>
+    invoke<number>("push_telemetry", { deviceId, events }),
 
   edgeStoreStats:   () => invoke<EdgeStoreStats>("edge_store_stats"),
   offlineQueueStats: () => invoke<OfflineQueueStats>("offline_queue_stats"),
