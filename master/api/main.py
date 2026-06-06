@@ -28,8 +28,10 @@ from master.core.auth.revocation import RevocationStore
 from master.core.config import get_settings
 from master.core.logging import get_logger, setup_logging
 from master.core.telemetry import setup_telemetry
+from master.llm.registry import shared_registry
 from master.mcp.audit import AuditLogger
 from master.mcp.registry import MCPServerRegistry
+from master.model_upgrade.scheduler import ModelUpgradeScheduler, make_litellm_generate
 from master.news.scheduler import NewsScheduler
 from master.orchestrator.graph import build_graph
 from master.sync.agent_worker import AgentTaskWorker, make_orchestrator_dispatch
@@ -96,6 +98,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         news_scheduler.attach(scheduler)
         app.state.news_scheduler = news_scheduler
         log.info("news_scheduler.ready")
+
+    # Model-upgrade: nightly shadow-eval of candidate models against the
+    # incumbent, promoting on the shared registry. Disabled when no candidates.
+    if settings.benchmark_enabled and settings.model_upgrade_candidates:
+        model_upgrade_scheduler = ModelUpgradeScheduler(
+            generate=make_litellm_generate(settings),
+            registry=shared_registry(),
+            redis=redis_client,
+            candidates=settings.model_upgrade_candidates,
+        )
+        model_upgrade_scheduler.attach(scheduler, cron=settings.benchmark_schedule_cron)
+        app.state.model_upgrade_scheduler = model_upgrade_scheduler
+        log.info("model_upgrade.scheduler.ready", candidates=len(settings.model_upgrade_candidates))
 
     scheduler.start()
     app.state.scheduler = scheduler

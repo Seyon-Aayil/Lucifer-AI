@@ -148,6 +148,9 @@ class Settings(BaseSettings):
     benchmark_enabled: bool = True
     benchmark_schedule_cron: str = "0 2 * * *"
     shadow_eval_sample_size: int = 100
+    # Candidate model ids the upgrade scheduler shadow-evaluates against the
+    # incumbent strong-tier model. Empty disables the upgrade job.
+    model_upgrade_candidates: list[str] = Field(default_factory=list)
 
     @field_validator("app_secret_key")
     @classmethod

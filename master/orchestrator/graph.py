@@ -131,10 +131,12 @@ async def execute_node(state: OrchestratorState, config: dict[str, Any]) -> dict
         request: AgentRequest = state["agent_request"]
 
         from master.agents.base.agent import AgentResponse
-        from master.llm.registry import ProviderRegistry
+        from master.llm.registry import shared_registry
         from master.mcp.registry import MCPServerRegistry
 
-        llm_registry = ProviderRegistry.from_settings()
+        # Shared instance so model-upgrade promotions (set_strong_model) affect
+        # live routing without a restart.
+        llm_registry = shared_registry()
 
         mcp_client = None
         mcp_registry = (config or {}).get("configurable", {}).get("mcp_registry")
