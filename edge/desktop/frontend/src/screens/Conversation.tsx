@@ -41,13 +41,15 @@ export function Conversation() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [backend, setBackend] = useState("ollama");
+  const [model, setModel] = useState(DEFAULT_MODEL);
   const [error, setError] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(true);
   const tail = useRef<HTMLDivElement>(null);
 
-  // ── Load backend + conversation list on mount ─────────────────────────
+  // ── Load backend + model preference + conversation list on mount ──────
   useEffect(() => {
     ipc.localBackend().then(setBackend).catch(() => {});
+    ipc.getSettings().then((s) => setModel(s.default_model)).catch(() => {});
     refreshConversations();
   }, []);
 
@@ -130,7 +132,7 @@ export function Conversation() {
       role: "assistant",
       content: "",
       agent: "personal-agent",
-      model: `${DEFAULT_MODEL} · ${backend}`,
+      model: `${model} · ${backend}`,
       pending: true,
     };
     setMessages((m) => [...m, userMsg, placeholder]);
@@ -154,7 +156,7 @@ export function Conversation() {
 
     let acc = "";
     try {
-      await ipc.localGenerateStream(DEFAULT_MODEL, prompt, (chunk) => {
+      await ipc.localGenerateStream(model, prompt, (chunk) => {
         acc += chunk.text;
         setMessages((m) => {
           const next = [...m];
@@ -173,7 +175,7 @@ export function Conversation() {
         role: "assistant",
         content: acc,
         agent_id: "personal-agent",
-        model: `${DEFAULT_MODEL} · ${backend}`,
+        model: `${model} · ${backend}`,
         tokens: null,
         created_at: nowMs(),
       });
