@@ -397,20 +397,86 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Fire a telemetry batch. Currently a stub that converts the JS payload but
-/// doesn't yet hit the proto-level `TelemetryBatch` (proto schema for events
-/// is still being finalised in `infra/proto/lucifer_sync.proto`).
+/// Ship a telemetry batch to the master over the `PushTelemetry` RPC.
+///
+/// Each edge [`TelemetryEvent`] carries a free-form `attributes` JSON object;
+/// numeric attributes are mapped to the proto `metrics` map and everything else
+/// is stringified into `metadata`. Returns the master's accepted count.
 pub async fn push_telemetry(
     handle: &ClientHandle,
+    device_id: String,
     events: Vec<TelemetryEvent>,
 ) -> Result<u32, ConnectError> {
     if !handle.is_connected().await {
         return Err(ConnectError::NotConnected);
     }
-    // TODO: map TelemetryEvent → proto::TelemetryBatch once the proto event
-    // shape is finalised. For now, log and ack.
-    tracing::debug!(count = events.len(), "telemetry batch queued");
-    Ok(events.len() as u32)
+    if events.is_empty() {
+        return Ok(0);
+    }
+    handle
+        .with_mut(|client| {
+            Box::pin(async move {
+                let proto_events: Vec<_> = events.into_iter().map(to_proto_event).collect();
+                let batch = lucifer_sync_client::proto::TelemetryBatch {
+                    device_id,
+                    events: proto_events,
+                };
+                let ack = client.push_telemetry(batch).await?;
+                Ok(ack.accepted_count as u32)
+            })
+        })
+        .await
+}
+
+/// Map an edge [`TelemetryEvent`] onto its proto counterpart. `timestamp_ms` is
+/// converted to the microseconds the proto/master schema expects; `device_id`
+/// is left blank so the master falls back to the enclosing batch's device id.
+fn to_proto_event(e: TelemetryEvent) -> lucifer_sync_client::proto::TelemetryEvent {
+    let (metrics, metadata) = split_attributes(e.attributes);
+    lucifer_sync_client::proto::TelemetryEvent {
+        event_type: e.event_type,
+        timestamp: e.timestamp_ms.saturating_mul(1_000),
+        device_id: String::new(),
+        agent_id: String::new(),
+        trace_id: String::new(),
+        span_id: String::new(),
+        metrics,
+        metadata,
+        cost_usd: 0.0,
+        error: false,
+        error_code: String::new(),
+    }
+}
+
+/// Split a free-form attributes object: numbers → `metrics` (f64), all other
+/// scalar/compound values → `metadata` (stringified). Non-object inputs yield
+/// two empty maps.
+fn split_attributes(
+    value: serde_json::Value,
+) -> (
+    std::collections::HashMap<String, f64>,
+    std::collections::HashMap<String, String>,
+) {
+    let mut metrics = std::collections::HashMap::new();
+    let mut metadata = std::collections::HashMap::new();
+    if let serde_json::Value::Object(map) = value {
+        for (k, v) in map {
+            match v {
+                serde_json::Value::Number(n) => {
+                    if let Some(f) = n.as_f64() {
+                        metrics.insert(k, f);
+                    }
+                }
+                serde_json::Value::String(s) => {
+                    metadata.insert(k, s);
+                }
+                other => {
+                    metadata.insert(k, other.to_string());
+                }
+            }
+        }
+    }
+    (metrics, metadata)
 }
 
 #[cfg(feature = "tauri-cmd")]
@@ -452,9 +518,10 @@ pub mod __handlers {
     #[tauri::command]
     pub async fn push_telemetry(
         handle: State<'_, ClientHandle>,
+        device_id: String,
         events: Vec<TelemetryEvent>,
     ) -> Result<u32, ConnectError> {
-        super::push_telemetry(handle.inner(), events).await
+        super::push_telemetry(handle.inner(), device_id, events).await
     }
 
     #[tauri::command]
@@ -697,8 +764,46 @@ mod tests {
     #[tokio::test]
     async fn push_telemetry_requires_connection() {
         let h = ClientHandle::default();
-        let err = push_telemetry(&h, vec![]).await.unwrap_err();
+        let err = push_telemetry(&h, "dev-1".into(), vec![])
+            .await
+            .unwrap_err();
         assert!(matches!(err, ConnectError::NotConnected));
+    }
+
+    #[test]
+    fn split_attributes_routes_numbers_to_metrics() {
+        let v = serde_json::json!({
+            "latency_ms": 12.5,
+            "count": 3,
+            "model": "llama3.2",
+            "ok": true,
+        });
+        let (metrics, metadata) = split_attributes(v);
+        assert_eq!(metrics.get("latency_ms"), Some(&12.5));
+        assert_eq!(metrics.get("count"), Some(&3.0));
+        assert_eq!(metadata.get("model").map(String::as_str), Some("llama3.2"));
+        assert_eq!(metadata.get("ok").map(String::as_str), Some("true"));
+        assert!(!metadata.contains_key("latency_ms"));
+    }
+
+    #[test]
+    fn split_attributes_non_object_is_empty() {
+        let (metrics, metadata) = split_attributes(serde_json::json!("scalar"));
+        assert!(metrics.is_empty());
+        assert!(metadata.is_empty());
+    }
+
+    #[test]
+    fn to_proto_event_converts_ms_to_micros() {
+        let e = TelemetryEvent {
+            event_type: "rpc".into(),
+            timestamp_ms: 1_700,
+            attributes: serde_json::json!({"latency_ms": 4.0}),
+        };
+        let p = to_proto_event(e);
+        assert_eq!(p.event_type, "rpc");
+        assert_eq!(p.timestamp, 1_700_000);
+        assert_eq!(p.metrics.get("latency_ms"), Some(&4.0));
     }
 
     #[tokio::test]
