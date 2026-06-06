@@ -1,8 +1,11 @@
 // Avoid an extra console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::OnceLock;
+
 use lucifer_desktop_bindings::{
-    handlers, ClientHandle, EdgeStoreHandle, InferenceHandle, OfflineQueueHandle,
+    handlers, settings::AppSettings, ClientHandle, EdgeStoreHandle, InferenceHandle,
+    OfflineQueueHandle, SettingsHandle,
 };
 use tauri::{
     menu::{Menu, MenuItem},
@@ -12,6 +15,10 @@ use tauri::{
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 const OVERLAY_LABEL: &str = "overlay";
+
+/// The (modifiers, key) the overlay toggle is bound to, resolved from settings
+/// at startup. Changing the hotkey in Settings takes effect on next launch.
+static OVERLAY_BINDING: OnceLock<(Modifiers, Code)> = OnceLock::new();
 
 fn main() {
     init_tracing();
@@ -30,13 +37,15 @@ fn main() {
         .manage(ClientHandle::default())
         .manage(EdgeStoreHandle::default())
         .manage(OfflineQueueHandle::default())
+        .manage(SettingsHandle::default())
         .manage(build_inference_handle())
         .invoke_handler(handlers!())
         .setup(|app| {
+            load_settings(app.handle());
             register_overlay_shortcut(app.handle())?;
             install_tray(app.handle())?;
             open_default_local_stores(app.handle());
-            tracing::info!("Lucifer ready · ⌘+Space toggles overlay");
+            tracing::info!("Lucifer ready · overlay toggle registered");
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -44,13 +53,111 @@ fn main() {
 }
 
 fn is_overlay_shortcut(s: &Shortcut) -> bool {
-    s.matches(Modifiers::SUPER, Code::Space)
+    let (mods, code) = OVERLAY_BINDING.get().copied().unwrap_or((Modifiers::SUPER, Code::Space));
+    s.matches(mods, code)
+}
+
+/// Load persisted settings (sync, tiny file) and resolve the overlay binding.
+/// Also seeds the async `SettingsHandle` so the IPC commands serve the same data.
+fn load_settings(app: &tauri::AppHandle) {
+    let path = match app.path().app_data_dir() {
+        Ok(dir) => dir.join("settings.json"),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not resolve app data dir for settings");
+            let _ = OVERLAY_BINDING.set((Modifiers::SUPER, Code::Space));
+            return;
+        }
+    };
+
+    let settings = AppSettings::load(&path).unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "settings load failed — using defaults");
+        AppSettings::default()
+    });
+
+    let binding =
+        parse_accelerator(&settings.overlay_hotkey).unwrap_or((Modifiers::SUPER, Code::Space));
+    let _ = OVERLAY_BINDING.set(binding);
+
+    // Populate the IPC-facing handle from the same file.
+    let handle: SettingsHandle = (*app.state::<SettingsHandle>()).clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = handle.open(path).await {
+            tracing::warn!(error = %e, "settings handle open failed");
+        }
+    });
+}
+
+/// Parse a `Mod+Mod+Key` accelerator (e.g. `Super+Space`, `Control+Shift+K`)
+/// into modifiers + key code. Returns `None` if any token is unrecognised.
+fn parse_accelerator(accel: &str) -> Option<(Modifiers, Code)> {
+    let mut mods = Modifiers::empty();
+    let mut code: Option<Code> = None;
+    for token in accel.split('+').map(str::trim).filter(|t| !t.is_empty()) {
+        match token.to_ascii_lowercase().as_str() {
+            "super" | "cmd" | "command" | "meta" | "win" => mods |= Modifiers::SUPER,
+            "ctrl" | "control" => mods |= Modifiers::CONTROL,
+            "alt" | "option" | "opt" => mods |= Modifiers::ALT,
+            "shift" => mods |= Modifiers::SHIFT,
+            other => code = Some(parse_key(other)?),
+        }
+    }
+    code.map(|c| (mods, c))
+}
+
+/// Map a single key token to a `Code`. Supports A–Z, 0–9, Space, and a few
+/// common named keys; returns `None` for anything else.
+fn parse_key(token: &str) -> Option<Code> {
+    let t = token.to_ascii_lowercase();
+    Some(match t.as_str() {
+        "space" => Code::Space,
+        "enter" | "return" => Code::Enter,
+        "tab" => Code::Tab,
+        "escape" | "esc" => Code::Escape,
+        "a" => Code::KeyA,
+        "b" => Code::KeyB,
+        "c" => Code::KeyC,
+        "d" => Code::KeyD,
+        "e" => Code::KeyE,
+        "f" => Code::KeyF,
+        "g" => Code::KeyG,
+        "h" => Code::KeyH,
+        "i" => Code::KeyI,
+        "j" => Code::KeyJ,
+        "k" => Code::KeyK,
+        "l" => Code::KeyL,
+        "m" => Code::KeyM,
+        "n" => Code::KeyN,
+        "o" => Code::KeyO,
+        "p" => Code::KeyP,
+        "q" => Code::KeyQ,
+        "r" => Code::KeyR,
+        "s" => Code::KeyS,
+        "t" => Code::KeyT,
+        "u" => Code::KeyU,
+        "v" => Code::KeyV,
+        "w" => Code::KeyW,
+        "x" => Code::KeyX,
+        "y" => Code::KeyY,
+        "z" => Code::KeyZ,
+        "0" => Code::Digit0,
+        "1" => Code::Digit1,
+        "2" => Code::Digit2,
+        "3" => Code::Digit3,
+        "4" => Code::Digit4,
+        "5" => Code::Digit5,
+        "6" => Code::Digit6,
+        "7" => Code::Digit7,
+        "8" => Code::Digit8,
+        "9" => Code::Digit9,
+        _ => return None,
+    })
 }
 
 fn register_overlay_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let shortcut = Shortcut::new(Some(Modifiers::SUPER), Code::Space);
+    let (mods, code) = OVERLAY_BINDING.get().copied().unwrap_or((Modifiers::SUPER, Code::Space));
+    let shortcut = Shortcut::new(Some(mods), code);
     if let Err(e) = app.global_shortcut().register(shortcut) {
-        tracing::warn!(error = %e, "could not register ⌘+Space — another app may own it");
+        tracing::warn!(error = %e, "could not register overlay hotkey — another app may own it");
     }
     Ok(())
 }
@@ -170,4 +277,39 @@ fn init_tracing() {
         )
         .with_target(false)
         .init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_super_space() {
+        assert_eq!(
+            parse_accelerator("Super+Space"),
+            Some((Modifiers::SUPER, Code::Space))
+        );
+    }
+
+    #[test]
+    fn parses_multi_modifier_letter() {
+        assert_eq!(
+            parse_accelerator("Control+Shift+K"),
+            Some((Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyK))
+        );
+    }
+
+    #[test]
+    fn aliases_and_whitespace_tolerated() {
+        assert_eq!(
+            parse_accelerator(" cmd + opt + enter "),
+            Some((Modifiers::SUPER | Modifiers::ALT, Code::Enter))
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_key() {
+        assert_eq!(parse_accelerator("Super+F13"), None);
+        assert_eq!(parse_accelerator("Super"), None); // no key
+    }
 }
