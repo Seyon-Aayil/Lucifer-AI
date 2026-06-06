@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ipc, PendingAction } from "../lib/ipc";
+import { ipc, type AgentResult, PendingAction } from "../lib/ipc";
 
 const COLOR: Record<string, string> = {
   "personal-agent":  "#7C5CFF",
@@ -17,6 +17,7 @@ function colorFor(actionType: string): string {
 
 export function Approvals() {
   const [actions, setActions] = useState<PendingAction[]>([]);
+  const [results, setResults] = useState<AgentResult[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -28,6 +29,19 @@ export function Approvals() {
       if (list.length && !selected) setSelected(list[0].id);
     } catch (e) {
       setError(String(e));
+    }
+    // Pull any agent results the master finished for this device (best-effort;
+    // no-op when offline). Newest first, accumulated across polls.
+    try {
+      const settings = await ipc.getSettings();
+      if (settings.device_id) {
+        const fresh = await ipc.getPendingResults(settings.device_id);
+        if (fresh.length) {
+          setResults((prev) => [...fresh, ...prev].slice(0, 50));
+        }
+      }
+    } catch {
+      /* offline / not connected — ignore */
     }
   }
 
@@ -117,6 +131,33 @@ export function Approvals() {
             ))
           )}
         </ul>
+
+        <div className="border-t border-border">
+          <div className="flex items-center gap-2 px-3 py-2 text-xs">
+            <span className="text-text-2">Completed</span>
+            <span className="pill pill-standard ml-auto">{results.length}</span>
+          </div>
+          <ul className="max-h-56 overflow-auto p-2 flex flex-col gap-1.5">
+            {results.length === 0 ? (
+              <li className="text-xs text-text-3 px-1">No agent results yet.</li>
+            ) : (
+              results.map((r) => (
+                <li key={r.task_id} className="card !p-2.5">
+                  <div className="flex items-center gap-2 text-xs">
+                    <span
+                      className="size-2 rounded-full"
+                      style={{ background: colorFor(r.agent_id) }}
+                    />
+                    <span className="font-mono truncate">{r.agent_id}</span>
+                  </div>
+                  <div className="text-[11px] text-text-2 mt-1 line-clamp-3">
+                    {r.final_output || "(no output)"}
+                  </div>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
       </aside>
 
       <main className="flex-1 overflow-auto px-6 py-6">

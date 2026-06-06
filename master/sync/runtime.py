@@ -59,6 +59,7 @@ async def start_grpc_server(
     audit_logger: Any,
     revocation_store: Any,
     settings: Settings,
+    redis: Any = None,
 ) -> GRPCServer:
     """
     Build and start the gRPC server. Returns a GRPCServer handle.
@@ -72,6 +73,7 @@ async def start_grpc_server(
         db_pool=db_pool,
         nats_js=nats_js,
         audit_logger=audit_logger,
+        redis=redis,
     )
     add_LuciferSyncServicer_to_server(servicer, server)
 

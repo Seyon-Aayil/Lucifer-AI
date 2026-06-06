@@ -5,7 +5,7 @@ import warnings
 
 from . import lucifer_sync_pb2 as lucifer__sync__pb2
 
-GRPC_GENERATED_VERSION = '1.67.1'
+GRPC_GENERATED_VERSION = '1.71.2'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -55,6 +55,11 @@ class LuciferSyncStub(object):
                 request_serializer=lucifer__sync__pb2.TelemetryBatch.SerializeToString,
                 response_deserializer=lucifer__sync__pb2.PushAck.FromString,
                 _registered_method=True)
+        self.GetPendingResults = channel.unary_unary(
+                '/lucifer.sync.v1.LuciferSync/GetPendingResults',
+                request_serializer=lucifer__sync__pb2.ResultRequest.SerializeToString,
+                response_deserializer=lucifer__sync__pb2.ResultBatch.FromString,
+                _registered_method=True)
 
 
 class LuciferSyncServicer(object):
@@ -88,6 +93,14 @@ class LuciferSyncServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetPendingResults(self, request, context):
+        """Pull + clear agent-task results executed master-side for this device
+        (the async completions of offline QueuedActions). Unary poll.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_LuciferSyncServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -105,6 +118,11 @@ def add_LuciferSyncServicer_to_server(servicer, server):
                     servicer.PushTelemetry,
                     request_deserializer=lucifer__sync__pb2.TelemetryBatch.FromString,
                     response_serializer=lucifer__sync__pb2.PushAck.SerializeToString,
+            ),
+            'GetPendingResults': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetPendingResults,
+                    request_deserializer=lucifer__sync__pb2.ResultRequest.FromString,
+                    response_serializer=lucifer__sync__pb2.ResultBatch.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -194,6 +212,33 @@ class LuciferSync(object):
             '/lucifer.sync.v1.LuciferSync/PushTelemetry',
             lucifer__sync__pb2.TelemetryBatch.SerializeToString,
             lucifer__sync__pb2.PushAck.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetPendingResults(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/lucifer.sync.v1.LuciferSync/GetPendingResults',
+            lucifer__sync__pb2.ResultRequest.SerializeToString,
+            lucifer__sync__pb2.ResultBatch.FromString,
             options,
             channel_credentials,
             insecure,

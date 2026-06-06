@@ -40,6 +40,13 @@ export type AppSettings = {
   device_id: string;
 };
 
+export type AgentResult = {
+  task_id: string;
+  agent_id: string;
+  final_output: string;
+  completed_at: number;
+};
+
 const inTauri =
   typeof window !== "undefined" &&
   // @ts-expect-error — Tauri injects this at runtime
@@ -78,6 +85,8 @@ function mockResponse<T>(cmd: string): T {
       return { pending: 0, in_flight: 0, completed: 0, failed: 0 } as unknown as T;
     case "list_pending_actions":
       return [] as unknown as T;
+    case "get_pending_results":
+      return [] as unknown as T;
     case "list_nodes_by_type":
       return [] as unknown as T;
     case "list_conversations":
@@ -110,6 +119,8 @@ export const ipc = {
   isConnected:   () => invoke<boolean>("is_connected"),
   getHotSubgraph: (deviceId: string, lastSyncAtMs: number) =>
     invoke<SubgraphSummary>("get_hot_subgraph", { deviceId, lastSyncAtMs }),
+  getPendingResults: (deviceId: string, maxResults = 50) =>
+    invoke<AgentResult[]>("get_pending_results", { deviceId, maxResults }),
   pushTelemetry: (deviceId: string, events: TelemetryEvent[]) =>
     invoke<number>("push_telemetry", { deviceId, events }),
   getSettings: () => invoke<AppSettings>("get_settings"),

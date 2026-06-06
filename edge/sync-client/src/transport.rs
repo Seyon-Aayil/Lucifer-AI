@@ -11,8 +11,8 @@ use crate::{
     config::ClientConfig,
     error::{Error, Result},
     proto::{
-        lucifer_sync_client::LuciferSyncClient, PushAck, SubgraphRequest, SubgraphResponse,
-        SyncMessage, TelemetryBatch,
+        lucifer_sync_client::LuciferSyncClient, PushAck, ResultBatch, ResultRequest,
+        SubgraphRequest, SubgraphResponse, SyncMessage, TelemetryBatch,
     },
 };
 
@@ -91,6 +91,13 @@ impl SyncClient {
     /// surface the ack for backpressure-aware retries).
     pub async fn push_telemetry(&mut self, batch: TelemetryBatch) -> Result<PushAck> {
         let response = self.inner.push_telemetry(batch).await?;
+        Ok(response.into_inner())
+    }
+
+    /// Pull + clear agent-task results the master executed for this device
+    /// (async completions of offline QueuedActions).
+    pub async fn get_pending_results(&mut self, request: ResultRequest) -> Result<ResultBatch> {
+        let response = self.inner.get_pending_results(request).await?;
         Ok(response.into_inner())
     }
 }

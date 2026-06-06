@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -29,6 +30,13 @@ log = get_logger(__name__)
 
 _SUBJECT = "agent.task.>"
 _CONSUMER_NAME = "lucifer-agent-task-worker"
+_RESULTS_KEY = "lucifer:agent_results:{device_id}"
+_RESULTS_CAP = 100
+
+
+def results_key(device_id: str) -> str:
+    return _RESULTS_KEY.format(device_id=device_id)
+
 
 # A dispatch function turns a normalised request dict into a result dict.
 DispatchFn = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -72,10 +80,17 @@ class AgentTaskWorker:
     published back, and the message acked (or nak'd on failure for redelivery).
     """
 
-    def __init__(self, nats_js: Any, dispatch: DispatchFn, audit_logger: Any = None) -> None:
+    def __init__(
+        self,
+        nats_js: Any,
+        dispatch: DispatchFn,
+        audit_logger: Any = None,
+        redis: Any = None,
+    ) -> None:
         self._js = nats_js
         self._dispatch = dispatch
         self._audit = audit_logger
+        self._redis = redis
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -104,7 +119,14 @@ class AgentTaskWorker:
             request = self._parse(msg.data)
             device_id = request["device_id"]
             result = await self._dispatch(request)
-            await self._js.publish(f"agent.result.{device_id}", json.dumps(result).encode())
+            result.setdefault("completed_at", int(time.time() * 1000))
+            payload = json.dumps(result).encode()
+            await self._js.publish(f"agent.result.{device_id}", payload)
+            # Buffer for the edge to pull over gRPC (it has no NATS access).
+            if self._redis is not None:
+                key = results_key(device_id)
+                await self._redis.lpush(key, payload)
+                await self._redis.ltrim(key, 0, _RESULTS_CAP - 1)
             log.info(
                 "agent_task_worker.dispatched",
                 device_id=device_id,
