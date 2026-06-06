@@ -191,6 +191,14 @@ function Pair({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
         refreshToken: bundle.refresh_token,
         httpMasterEndpoint: httpEndpoint,
       });
+      // Remember the paired device id so the rest of the app can attribute
+      // sync + telemetry to the right device.
+      try {
+        const current = await ipc.getSettings();
+        await ipc.updateSettings({ ...current, device_id: persisted.device_id });
+      } catch {
+        /* non-fatal: settings persistence is best-effort */
+      }
       onNext();
     } catch (e) {
       setError(String(e));

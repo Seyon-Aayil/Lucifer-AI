@@ -37,6 +37,7 @@ export type AppSettings = {
   overlay_hotkey: string;
   inference_backend: string;
   default_model: string;
+  device_id: string;
 };
 
 const inTauri =
@@ -69,6 +70,7 @@ function mockResponse<T>(cmd: string): T {
         overlay_hotkey: "Super+Space",
         inference_backend: "auto",
         default_model: "llama3.2",
+        device_id: "",
       } as unknown as T;
     case "edge_store_stats":
       return { node_count: 0, edge_count: 0, last_sync_at_ms: null } as unknown as T;

@@ -38,6 +38,9 @@ pub struct AppSettings {
     /// Default model id used for local generation.
     #[serde(default = "default_model")]
     pub default_model: String,
+    /// Device id assigned at pairing. Empty until the device is paired.
+    #[serde(default)]
+    pub device_id: String,
 }
 
 impl Default for AppSettings {
@@ -46,6 +49,7 @@ impl Default for AppSettings {
             overlay_hotkey: default_overlay_hotkey(),
             inference_backend: default_inference_backend(),
             default_model: default_model(),
+            device_id: String::new(),
         }
     }
 }
@@ -139,6 +143,7 @@ mod tests {
             overlay_hotkey: "Control+Shift+Space".into(),
             inference_backend: "mlx".into(),
             default_model: "qwen2.5".into(),
+            device_id: "device-xyz".into(),
         };
         s.save(&p).unwrap();
         assert_eq!(AppSettings::load(&p).unwrap(), s);

@@ -3,16 +3,18 @@ import { ipc } from "../lib/ipc";
 
 export function ConnectionBar() {
   const [connected, setConnected] = useState(false);
+  const [deviceId, setDeviceId] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     ipc.isConnected().then(setConnected).catch(() => {});
+    ipc.getSettings().then((s) => setDeviceId(s.device_id)).catch(() => {});
   }, []);
 
   async function pull() {
     setError(null);
     try {
-      const summary = await ipc.getHotSubgraph("device-mac-01", 0);
+      const summary = await ipc.getHotSubgraph(deviceId || "unpaired", 0);
       // Surface as a transient toast via state; here just log to keep the bar terse
       console.log("hot subgraph", summary);
     } catch (e) {
