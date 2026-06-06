@@ -7,6 +7,7 @@ import { MenuBar } from "./screens/MenuBar";
 import { KnowledgeGraph } from "./screens/KnowledgeGraph";
 import { Approvals } from "./screens/Approvals";
 import { Onboarding } from "./screens/Onboarding";
+import { Settings } from "./screens/Settings";
 
 export function App() {
   const { pathname } = useLocation();
@@ -31,6 +32,7 @@ export function App() {
           <Route path="/graph"        element={<KnowledgeGraph />} />
           <Route path="/approvals"    element={<Approvals />} />
           <Route path="/onboarding"   element={<Onboarding />} />
+          <Route path="/settings"     element={<Settings />} />
         </Routes>
       </div>
     </div>

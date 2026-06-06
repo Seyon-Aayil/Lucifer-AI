@@ -8,6 +8,7 @@ const NAV: { to: string; label: string }[] = [
   { to: "/menu-bar",      label: "Status" },
   { to: "/overlay",       label: "Hotkey Overlay" },
   { to: "/onboarding",    label: "Onboarding" },
+  { to: "/settings",      label: "Settings" },
 ];
 
 export function Sidebar() {

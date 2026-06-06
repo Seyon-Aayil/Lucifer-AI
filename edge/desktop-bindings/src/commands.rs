@@ -14,6 +14,7 @@ use tokio::sync::Notify;
 use crate::{
     keychain::{self, PairingBundle, PersistedCredentials},
     refresher::{self, RefresherSpec},
+    settings::{AppSettings, SettingsHandle},
     state::{ClientHandle, EdgeStoreHandle, InferenceHandle, OfflineQueueHandle},
     types::{ConnectArgs, ConnectError, TelemetryEvent},
 };
@@ -479,6 +480,21 @@ fn split_attributes(
     (metrics, metadata)
 }
 
+// ── Settings ─────────────────────────────────────────────────────────────────
+
+/// Return the current persisted application settings.
+pub async fn get_settings(handle: &SettingsHandle) -> Result<AppSettings, ConnectError> {
+    Ok(handle.get().await)
+}
+
+/// Replace the application settings and write them through to disk.
+pub async fn update_settings(
+    handle: &SettingsHandle,
+    settings: AppSettings,
+) -> Result<(), ConnectError> {
+    handle.update(settings).await
+}
+
 #[cfg(feature = "tauri-cmd")]
 pub mod __handlers {
     //! Tauri-specific glue. Kept in a submodule so tests can call the bare
@@ -522,6 +538,21 @@ pub mod __handlers {
         events: Vec<TelemetryEvent>,
     ) -> Result<u32, ConnectError> {
         super::push_telemetry(handle.inner(), device_id, events).await
+    }
+
+    #[tauri::command]
+    pub async fn get_settings(
+        handle: State<'_, SettingsHandle>,
+    ) -> Result<AppSettings, ConnectError> {
+        super::get_settings(handle.inner()).await
+    }
+
+    #[tauri::command]
+    pub async fn update_settings(
+        handle: State<'_, SettingsHandle>,
+        settings: AppSettings,
+    ) -> Result<(), ConnectError> {
+        super::update_settings(handle.inner(), settings).await
     }
 
     #[tauri::command]
@@ -719,6 +750,8 @@ pub mod __handlers {
                 $crate::commands::__handlers::is_connected,
                 $crate::commands::__handlers::get_hot_subgraph,
                 $crate::commands::__handlers::push_telemetry,
+                $crate::commands::__handlers::get_settings,
+                $crate::commands::__handlers::update_settings,
                 $crate::commands::__handlers::open_edge_store,
                 $crate::commands::__handlers::edge_store_stats,
                 $crate::commands::__handlers::open_offline_queue,

@@ -33,6 +33,12 @@ export type TelemetryEvent = {
   attributes: Record<string, unknown>;
 };
 
+export type AppSettings = {
+  overlay_hotkey: string;
+  inference_backend: string;
+  default_model: string;
+};
+
 const inTauri =
   typeof window !== "undefined" &&
   // @ts-expect-error — Tauri injects this at runtime
@@ -57,6 +63,12 @@ function mockResponse<T>(cmd: string): T {
         generated_at: 0,
         manifest_hash: "mock",
         is_full_sync: false,
+      } as unknown as T;
+    case "get_settings":
+      return {
+        overlay_hotkey: "Super+Space",
+        inference_backend: "auto",
+        default_model: "llama3.2",
       } as unknown as T;
     case "edge_store_stats":
       return { node_count: 0, edge_count: 0, last_sync_at_ms: null } as unknown as T;
@@ -98,6 +110,9 @@ export const ipc = {
     invoke<SubgraphSummary>("get_hot_subgraph", { deviceId, lastSyncAtMs }),
   pushTelemetry: (deviceId: string, events: TelemetryEvent[]) =>
     invoke<number>("push_telemetry", { deviceId, events }),
+  getSettings: () => invoke<AppSettings>("get_settings"),
+  updateSettings: (settings: AppSettings) =>
+    invoke<void>("update_settings", { settings }),
 
   edgeStoreStats:   () => invoke<EdgeStoreStats>("edge_store_stats"),
   offlineQueueStats: () => invoke<OfflineQueueStats>("offline_queue_stats"),
