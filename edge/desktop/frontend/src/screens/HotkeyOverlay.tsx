@@ -8,11 +8,13 @@ export function HotkeyOverlay() {
   const [output, setOutput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [backend, setBackend] = useState("ollama");
+  const [model, setModel] = useState(DEFAULT_MODEL);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     ipc.localBackend().then(setBackend).catch(() => {});
+    ipc.getSettings().then((s) => setModel(s.default_model)).catch(() => {});
     inputRef.current?.focus();
   }, []);
 
@@ -24,7 +26,7 @@ export function HotkeyOverlay() {
     setStreaming(true);
     try {
       let acc = "";
-      await ipc.localGenerateStream(DEFAULT_MODEL, text, (chunk) => {
+      await ipc.localGenerateStream(model, text, (chunk) => {
         acc += chunk.text;
         setOutput(acc);
       });
@@ -103,7 +105,7 @@ export function HotkeyOverlay() {
         <div className="px-4 py-2 border-t border-border bg-surface-elev text-[11px] text-text-3 flex gap-4">
           <span>Esc clear</span>
           <span>↩ submit</span>
-          <span className="ml-auto font-mono">{DEFAULT_MODEL}</span>
+          <span className="ml-auto font-mono">{model}</span>
         </div>
       </div>
     </div>
