@@ -42,6 +42,7 @@ export function Conversation() {
   const [busy, setBusy] = useState(false);
   const [backend, setBackend] = useState("ollama");
   const [model, setModel] = useState(DEFAULT_MODEL);
+  const [deviceId, setDeviceId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(true);
   const tail = useRef<HTMLDivElement>(null);
@@ -49,7 +50,13 @@ export function Conversation() {
   // ── Load backend + model preference + conversation list on mount ──────
   useEffect(() => {
     ipc.localBackend().then(setBackend).catch(() => {});
-    ipc.getSettings().then((s) => setModel(s.default_model)).catch(() => {});
+    ipc
+      .getSettings()
+      .then((s) => {
+        setModel(s.default_model);
+        setDeviceId(s.device_id);
+      })
+      .catch(() => {});
     refreshConversations();
   }, []);
 
@@ -180,6 +187,16 @@ export function Conversation() {
         created_at: nowMs(),
       });
       await refreshConversations();
+      // Fire-and-forget telemetry; silently a no-op when offline.
+      ipc
+        .pushTelemetry(deviceId || "unpaired", [
+          {
+            eventType: "conversation.turn",
+            timestampMs: nowMs(),
+            attributes: { model, backend, chars: acc.length },
+          },
+        ])
+        .catch(() => {});
     } catch (e) {
       const msg = String(e);
       setError(msg);
