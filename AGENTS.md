@@ -445,6 +445,11 @@ Stitch-designed surfaces.
 code-signing + notarised .dmg via `tauri build`, MLX integration, hotkey
 preferences UI, then Phase 4c.
 
-### Phase 4c — Tauri Mobile Go/No-Go (⏳ Planned)
+### Phase 4c — Tauri Mobile Go/No-Go (🟡 Decision drafted)
 - Evaluate Tauri 2.0 iOS/Android vs React Native + native SwiftUI/Compose
+- **Decision: GO with Tauri 2.0 mobile, conditional on a de-risking spike.**
+  Reuses the protocol-heavy edge stack (sync-client, edge-store, offline-queue) +
+  React UI as one codebase. Pivotal constraint = on-device inference (Ollama is
+  dead on mobile → standardise on llama.cpp behind the existing `Inference` trait).
+  Go/No-Go gates + spike plan in [docs/phase-4c-mobile-go-no-go.md](docs/phase-4c-mobile-go-no-go.md).
 - Decision gates entry to Phase 5
