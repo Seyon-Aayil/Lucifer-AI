@@ -20,6 +20,18 @@ pub const fn is_apple_silicon() -> bool {
 ///
 /// Always returns a working `Inference` impl; never panics.
 pub fn select_backend(ollama_endpoint: &str) -> (Backend, Arc<dyn Inference>) {
+    // Opt-in llama.cpp backend (Phase 4c spike): explicit GGUF model path.
+    #[cfg(feature = "llama")]
+    {
+        if let Ok(model) = std::env::var("LUCIFER_LLAMA_MODEL") {
+            if !model.is_empty() {
+                tracing::info!(backend = "llama", model = %model, "llama.cpp backend selected");
+                let inference = crate::llama::LlamaCppInference::new(model);
+                return (Backend::Llama, Arc::new(inference));
+            }
+        }
+    }
+
     #[cfg(feature = "mlx")]
     {
         if is_apple_silicon() {
@@ -82,5 +94,6 @@ mod tests {
     fn backend_label_round_trip() {
         assert_eq!(Backend::Mlx.label(), "mlx");
         assert_eq!(Backend::Ollama.label(), "ollama");
+        assert_eq!(Backend::Llama.label(), "llama");
     }
 }

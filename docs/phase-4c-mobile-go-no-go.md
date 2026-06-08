@@ -115,8 +115,13 @@ only (RN shell + the same Rust core via uniffi), keeping the master side unchang
 
 ## 7. Spike plan (≈1–2 weeks, before any production commit)
 
-1. `edge-inference` crate: wrap `llama-cpp-2` behind the `Inference` trait; smoke-test
-   on macOS, then `aarch64-apple-ios` + Android.
+1. **Inference seam — scaffolded.** The `llama` backend lives in
+   `edge/mlx-runtime/src/llama.rs` (feature `llama`, off by default): `Backend::Llama`
+   tag, `LlamaCppInference` implementing the `Inference` trait, and opt-in selection
+   via `LUCIFER_LLAMA_MODEL`. The token loop returns `LlamaUnavailable` until wired.
+   **Remaining:** add `dep:llama-cpp-2`, implement `generate_stream` (load GGUF →
+   context → tokenize → sample loop), smoke-test on macOS, then `aarch64-apple-ios`
+   + Android NDK targets.
 2. `cargo tauri ios init` / `android init` on a throwaway branch; link sync-client +
    edge-store; get a blank app to launch.
 3. Wire one screen: pair → `GetHotSubgraph` → render node count (gate 2).

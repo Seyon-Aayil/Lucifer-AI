@@ -46,6 +46,10 @@ pub trait Inference: Send + Sync {
 pub enum Backend {
     Mlx,
     Ollama,
+    /// llama.cpp (cross-platform GGUF). The chosen mobile inference engine —
+    /// see docs/phase-4c-mobile-go-no-go.md. Wiring to `llama-cpp-2` lands in
+    /// the Phase 4c device spike; the seam is scaffolded in `llama.rs`.
+    Llama,
 }
 
 impl Backend {
@@ -53,6 +57,7 @@ impl Backend {
         match self {
             Backend::Mlx => "mlx",
             Backend::Ollama => "ollama",
+            Backend::Llama => "llama",
         }
     }
 }
