@@ -1,7 +1,7 @@
 # Lucifer AI — Dev Stack Makefile
 # Usage: make <target>
 
-.PHONY: up down reset test lint typecheck migrate proto clean help edge-build edge-test edge-lint edge-cli edge-desktop edge-desktop-release edge-desktop-run edge-frontend-install edge-frontend-build edge-frontend-dev
+.PHONY: up down reset test lint typecheck migrate proto clean help edge-build edge-test edge-lint edge-cli edge-desktop edge-desktop-release edge-desktop-run edge-frontend-install edge-frontend-build edge-frontend-dev spike-mobile-check spike-mobile-prep
 
 # ─── Colours ────────────────────────────────────────────────────────────────
 CYAN  := \033[0;36m
@@ -170,3 +170,18 @@ shell-postgres: ## Open psql shell into the dev Postgres instance
 shell-neo4j: ## Open cypher-shell into the dev Neo4j instance
 	docker compose -f infra/docker-compose.yml exec neo4j \
 		cypher-shell -u neo4j -p $$(grep NEO4J_PASSWORD .env | cut -d= -f2)
+
+# ─── Phase 4c — Mobile spike (see docs/phase-4c-spike-runbook.md) ─────────────
+spike-mobile-check: ## Report mobile-spike prerequisite status (read-only)
+	@echo "$(CYAN)Phase 4c mobile-spike prerequisites:$(RESET)"
+	@printf "  Xcode CLT     : "; xcode-select -p >/dev/null 2>&1 && echo "ok" || echo "MISSING (xcode-select --install)"
+	@printf "  metal toolchain: "; xcrun --find metal >/dev/null 2>&1 && echo "ok" || echo "MISSING (xcodebuild -downloadComponent MetalToolchain)"
+	@printf "  ANDROID_HOME  : "; [ -n "$$ANDROID_HOME" ] && echo "$$ANDROID_HOME" || echo "UNSET"
+	@printf "  cargo-tauri   : "; command -v cargo-tauri >/dev/null 2>&1 && echo "ok" || echo "MISSING (make spike-mobile-prep)"
+	@printf "  rust targets  : "; rustup target list --installed 2>/dev/null | grep -qE "aarch64-apple-ios" && echo "ios ok" || echo "MISSING (make spike-mobile-prep)"
+
+spike-mobile-prep: ## Install Rust mobile targets + Tauri CLI (no device build)
+	rustup target add aarch64-apple-ios aarch64-apple-ios-sim \
+		aarch64-linux-android armv7-linux-androideabi \
+		i686-linux-android x86_64-linux-android
+	cargo install tauri-cli --version '^2' --locked
