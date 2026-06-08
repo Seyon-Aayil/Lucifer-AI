@@ -32,6 +32,7 @@ from master.llm.registry import shared_registry
 from master.mcp.audit import AuditLogger
 from master.mcp.registry import MCPServerRegistry
 from master.model_upgrade.judge import make_llm_judge_score
+from master.model_upgrade.replay import make_replay_loader
 from master.model_upgrade.scheduler import (
     ModelUpgradeScheduler,
     apply_persisted_strong_model,
@@ -115,12 +116,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             if settings.model_upgrade_use_judge
             else None
         )
+        replay_loader = (
+            make_replay_loader(db_pool, settings.shadow_eval_sample_size)
+            if settings.model_upgrade_use_replay
+            else None
+        )
         model_upgrade_scheduler = ModelUpgradeScheduler(
             generate=make_litellm_generate(settings),
             registry=shared_registry(),
             redis=redis_client,
             candidates=settings.model_upgrade_candidates,
             score=judge_score,
+            queries_loader=replay_loader,
         )
         model_upgrade_scheduler.attach(scheduler, cron=settings.benchmark_schedule_cron)
         app.state.model_upgrade_scheduler = model_upgrade_scheduler

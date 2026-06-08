@@ -154,6 +154,8 @@ class Settings(BaseSettings):
     # Use an LLM-as-judge scorer instead of exact-substring golden matching.
     model_upgrade_use_judge: bool = False
     model_upgrade_judge_model: str = "anthropic/claude-haiku-4"
+    # Replay real captured traffic (query_log) instead of the golden set.
+    model_upgrade_use_replay: bool = False
 
     @field_validator("app_secret_key")
     @classmethod

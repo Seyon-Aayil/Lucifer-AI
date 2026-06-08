@@ -152,6 +152,13 @@ async def chat(
 
         await _check_content_policy(response_text, "output")
 
+        # Capture the turn for model-upgrade replay (best-effort, non-blocking).
+        db_pool = getattr(request.app.state, "db_pool", None)
+        if db_pool is not None:
+            from master.model_upgrade.replay import record_query
+
+            await record_query(db_pool, body.message, response_text, agent_id)
+
         log.info(
             "chat.completed",
             task_id=task_id,

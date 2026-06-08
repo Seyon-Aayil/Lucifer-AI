@@ -61,6 +61,11 @@ async def test_required_extensions_installed(pg_pool) -> None:
     assert "uuid-ossp" in names, f"uuid-ossp missing; have {names}"
 
 
+async def test_query_log_table_exists(pg_pool) -> None:
+    exists = await pg_pool.fetchval("SELECT to_regclass('public.query_log') IS NOT NULL")
+    assert exists is True, "query_log table missing (model-upgrade replay capture)"
+
+
 async def test_telemetry_events_is_hypertable(pg_pool) -> None:
     count = await pg_pool.fetchval(
         """

@@ -30,6 +30,8 @@ log = get_logger(__name__)
 
 # generate(prompt, model_id) -> response text
 GenerateFn = Callable[[str, str], Awaitable[str]]
+# queries_loader(incumbent_id) -> replay set to evaluate over
+QueriesLoader = Callable[[str], Awaitable[list[ReplayQuery]]]
 
 _REDIS_STRONG_KEY = "lucifer:model:strong"
 
@@ -95,6 +97,7 @@ class ModelUpgradeScheduler:
         candidates: list[str] | None = None,
         tasks: list[GoldenTask] | None = None,
         score: ScoreFn | None = None,
+        queries_loader: QueriesLoader | None = None,
     ) -> None:
         self._generate = generate
         self._registry = registry
@@ -103,6 +106,8 @@ class ModelUpgradeScheduler:
         self._tasks = tasks or GOLDEN_TASKS
         # Injected scorer (e.g. LLM judge) wins; otherwise exact-substring golden.
         self._score = score or substring_score_fn(self._tasks)
+        # Injected replay-set loader (e.g. real query_log); default = golden.
+        self._queries_loader = queries_loader or self._golden_loader
 
     def attach(self, scheduler: Any, cron: str = "0 2 * * *") -> None:
         """Register the cycle on an AsyncIOScheduler using a crontab expression."""
@@ -114,23 +119,32 @@ class ModelUpgradeScheduler:
         )
         log.info("model_upgrade.scheduler.attached", cron=cron, candidates=len(self._candidates))
 
+    async def _golden_loader(self, incumbent: str) -> list[ReplayQuery]:
+        """
+        Default replay set: generate the incumbent's own answer per golden task,
+        so a candidate is only promoted if it scores strictly better.
+        """
+        queries: list[ReplayQuery] = []
+        for t in self._tasks:
+            incumbent_answer = await self._generate(t.prompt, incumbent)
+            queries.append(ReplayQuery(t.query_id, t.prompt, incumbent_answer))
+        return queries
+
     async def run_cycle(self) -> list[PromotionOutcome]:
         """Evaluate every candidate against the incumbent; act on each verdict."""
         incumbent = self._registry.strong_model_id
         evaluator = ShadowEvaluator(self._generate, self._score)
         promoter = ModelPromoter(self._activate, self._request_confirmation)
 
+        queries = await self._queries_loader(incumbent)
+        if not queries:
+            log.warning("model_upgrade.no_queries")
+            return []
+
         outcomes: list[PromotionOutcome] = []
         for candidate in self._candidates:
             if candidate == incumbent:
                 continue
-            # Build the replay set: the incumbent's own answer is the baseline,
-            # so a candidate is only promoted if it scores strictly better.
-            queries: list[ReplayQuery] = []
-            for t in self._tasks:
-                incumbent_answer = await self._generate(t.prompt, incumbent)
-                queries.append(ReplayQuery(t.query_id, t.prompt, incumbent_answer))
-
             result = await evaluator.evaluate(candidate, incumbent, queries)
             outcome = await promoter.maybe_promote(result)
             log.info(
