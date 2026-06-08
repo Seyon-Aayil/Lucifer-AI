@@ -174,6 +174,17 @@ CREATE TABLE refresh_tokens (
 
 CREATE INDEX idx_refresh_tokens_device ON refresh_tokens (device_id, expires_at DESC);
 
+-- ── Query Log (real-traffic capture for model-upgrade replay) ─────────────────
+CREATE TABLE query_log (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    prompt          TEXT NOT NULL,
+    response        TEXT NOT NULL,
+    agent_id        TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_query_log_created ON query_log (created_at DESC);
+
 -- ── Trigger: updated_at auto-update ──────────────────────────────────────────
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
