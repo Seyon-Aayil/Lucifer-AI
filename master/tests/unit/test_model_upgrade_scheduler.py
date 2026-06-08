@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from master.llm.registry import ProviderRegistry, reset_shared_registry, shared_registry
 from master.model_upgrade.golden import GoldenTask, substring_score_fn
+from master.model_upgrade.judge import parse_judge_score
 from master.model_upgrade.scheduler import (
     ModelUpgradeScheduler,
     apply_persisted_strong_model,
@@ -43,6 +44,43 @@ class TestSubstringScore:
         assert await score("Pa", "the answer is XA!") == 1.0
         assert await score("Pa", "wrong") == 0.0
         assert await score("unknown-prompt", "xa") == 0.0
+
+
+class TestJudgeScore:
+    def test_parses_and_normalises(self):
+        assert parse_judge_score("8") == 0.8
+        assert parse_judge_score("Score: 10") == 1.0
+        assert parse_judge_score("0") == 0.0
+
+    def test_clamps_and_handles_garbage(self):
+        assert parse_judge_score("12") == 1.0  # clamp >10
+        assert parse_judge_score("-3") == 0.0  # clamp <0
+        assert parse_judge_score("no number here") == 0.0
+        assert parse_judge_score("") == 0.0
+
+
+class TestInjectedScore:
+    async def test_uses_injected_scorer(self):
+        reg = _registry("incumbent-1")
+
+        # injected scorer: candidate model scores 1.0, incumbent answers score 0.5
+        async def score(prompt: str, response: str) -> float:
+            return 1.0 if response == "GREAT" else 0.5
+
+        async def gen(prompt: str, model_id: str) -> str:
+            return "GREAT" if model_id == "cand-1" else "meh"
+
+        sched = ModelUpgradeScheduler(
+            generate=gen,
+            registry=reg,
+            redis=AsyncMock(),
+            candidates=["cand-1"],
+            tasks=_TASKS,
+            score=score,
+        )
+        outcomes = await sched.run_cycle()
+        assert outcomes[0].decision is PromotionDecision.AUTO_PROMOTE
+        reg.set_strong_model.assert_called_once_with("cand-1")
 
 
 class TestRunCycle:

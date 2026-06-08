@@ -22,7 +22,7 @@ from typing import Any
 from apscheduler.triggers.cron import CronTrigger
 
 from master.core.logging import get_logger
-from master.model_upgrade.golden import GOLDEN_TASKS, GoldenTask, substring_score_fn
+from master.model_upgrade.golden import GOLDEN_TASKS, GoldenTask, ScoreFn, substring_score_fn
 from master.model_upgrade.promoter import ModelPromoter, ReplayQuery, ShadowEvaluator
 from master.model_upgrade.types import PromotionOutcome
 
@@ -94,13 +94,15 @@ class ModelUpgradeScheduler:
         redis: Any = None,
         candidates: list[str] | None = None,
         tasks: list[GoldenTask] | None = None,
+        score: ScoreFn | None = None,
     ) -> None:
         self._generate = generate
         self._registry = registry
         self._redis = redis
         self._candidates = candidates or []
         self._tasks = tasks or GOLDEN_TASKS
-        self._score = substring_score_fn(self._tasks)
+        # Injected scorer (e.g. LLM judge) wins; otherwise exact-substring golden.
+        self._score = score or substring_score_fn(self._tasks)
 
     def attach(self, scheduler: Any, cron: str = "0 2 * * *") -> None:
         """Register the cycle on an AsyncIOScheduler using a crontab expression."""
