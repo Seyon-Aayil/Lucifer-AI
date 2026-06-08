@@ -13,6 +13,10 @@ description = "Apple-Silicon MLX inference backend for the Lucifer edge clients 
 # CI runners without cmake) keep building.
 default = []
 mlx = ["dep:mlx-rs", "dep:tokenizers", "dep:safetensors", "dep:tokio-stream"]
+# `llama` scaffolds the cross-platform llama.cpp backend (Phase 4c mobile engine).
+# The seam compiles pure-Rust today; the `llama-cpp-2` token loop is wired in the
+# Phase 4c device spike (Gate 3). Off by default.
+llama = []
 
 [dependencies]
 lucifer-ollama-sidecar = { path = "../ollama-sidecar" }

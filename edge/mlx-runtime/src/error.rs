@@ -8,6 +8,9 @@ pub enum Error {
     #[error("mlx backend not available: {0}")]
     MlxUnavailable(String),
 
+    #[error("llama.cpp backend not available: {0}")]
+    LlamaUnavailable(String),
+
     #[error("invalid input: {0}")]
     Invalid(String),
 }

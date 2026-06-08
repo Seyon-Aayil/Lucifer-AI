@@ -22,6 +22,9 @@ pub mod platform;
 #[cfg(feature = "mlx")]
 pub mod mlx;
 
+#[cfg(feature = "llama")]
+pub mod llama;
+
 pub use backend::{Backend, Inference, InferenceChunk};
 pub use error::{Error, Result};
 pub use platform::{is_apple_silicon, select_backend};
