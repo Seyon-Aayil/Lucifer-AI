@@ -15,7 +15,9 @@ import secrets
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 # ── Argon2id Configuration (OWASP 2024 minimum) ──────────────────────────────
 _ARGON2 = PasswordHasher(
@@ -52,6 +54,25 @@ def verify_key(hash_str: str, password: str) -> bool:
         return _ARGON2.verify(hash_str, password)
     except VerifyMismatchError:
         return False
+
+
+def hkdf_sha256(
+    key_material: bytes,
+    info: bytes,
+    length: int = 32,
+    salt: bytes | None = None,
+) -> bytes:
+    """
+    Derive a subkey from existing key material via HKDF-SHA256 (RFC 5869).
+    `info` provides domain separation — distinct info strings yield
+    independent keys from the same master secret.
+    """
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=length,
+        salt=salt,
+        info=info,
+    ).derive(key_material)
 
 
 def derive_aes_key(password: str, salt: bytes | None = None) -> tuple[bytes, bytes]:

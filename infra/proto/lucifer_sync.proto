@@ -32,7 +32,10 @@ message SyncMessage {
   repeated EdgeDelta  edge_deltas    = 4;
   repeated ArtifactRef new_artifacts = 5;
   repeated QueuedAction offline_actions = 6;
-  bytes  payload_hmac  = 7;    // AES-GCM auth tag over the serialised payload
+  // HMAC-SHA256 over SerializeToString(message with this field cleared),
+  // full 32 bytes. Key = HKDF-SHA256(app_secret_key, info="lucifer-sync-payload-hmac").
+  // Optional until edge clients adopt the contract; the master logs absence.
+  bytes  payload_hmac  = 7;
   int64  vector_clock  = 8;    // Lamport clock for conflict detection
   string client_version = 9;
 }

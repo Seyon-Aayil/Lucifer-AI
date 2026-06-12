@@ -18,6 +18,7 @@ from master.core.crypto import (
     derive_key,
     encrypt,
     encrypt_str,
+    hkdf_sha256,
     hmac_sha256,
     sha256_hex,
     verify_key,
@@ -82,6 +83,27 @@ class TestAESGCM:
     def test_wrong_key_length_raises_value_error(self) -> None:
         with pytest.raises(ValueError, match="32 bytes"):
             encrypt(b"data", b"short-key")
+
+
+class TestHKDF:
+    def test_deterministic(self) -> None:
+        k1 = hkdf_sha256(b"master-secret", info=b"context-a")
+        k2 = hkdf_sha256(b"master-secret", info=b"context-a")
+        assert k1 == k2
+
+    def test_default_length_32(self) -> None:
+        assert len(hkdf_sha256(b"master-secret", info=b"x")) == 32
+
+    def test_custom_length(self) -> None:
+        assert len(hkdf_sha256(b"master-secret", info=b"x", length=64)) == 64
+
+    def test_info_domain_separation(self) -> None:
+        k1 = hkdf_sha256(b"master-secret", info=b"context-a")
+        k2 = hkdf_sha256(b"master-secret", info=b"context-b")
+        assert k1 != k2
+
+    def test_different_key_material(self) -> None:
+        assert hkdf_sha256(b"secret-1", info=b"x") != hkdf_sha256(b"secret-2", info=b"x")
 
 
 class TestHMACChain:
