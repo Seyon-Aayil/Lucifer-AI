@@ -23,7 +23,7 @@ from master.core.config import Settings
 from master.core.logging import get_logger
 from master.sync.auth import DeviceAuthInterceptor
 from master.sync.lucifer_sync_pb2_grpc import (
-    add_LuciferSyncServicer_to_server,  # type: ignore[import]
+    add_LuciferSyncServicer_to_server,
 )
 from master.sync.server import LuciferSyncServicer
 
@@ -75,7 +75,7 @@ async def start_grpc_server(
         audit_logger=audit_logger,
         redis=redis,
     )
-    add_LuciferSyncServicer_to_server(servicer, server)
+    add_LuciferSyncServicer_to_server(servicer, server)  # type: ignore[no-untyped-call]
 
     credentials = _load_credentials(settings)
     if credentials:

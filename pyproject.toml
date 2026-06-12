@@ -156,9 +156,6 @@ ignore_missing_imports = true
 module = [
     "master.sync.lucifer_sync_pb2",
     "master.sync.lucifer_sync_pb2_grpc",
-    "master.sync.auth",
-    "master.sync.server",
-    "master.sync.runtime",
 ]
 ignore_errors = true
 
