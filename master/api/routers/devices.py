@@ -360,12 +360,16 @@ async def pair_device(
         async with db.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO devices (device_id, device_type, name, app_version, os_version, last_seen_at)
-                VALUES ($1, 'desktop', $2, '0.0.0', 'unknown', NOW())
-                ON CONFLICT (device_id) DO UPDATE SET last_seen_at = NOW()
+                INSERT INTO devices (device_id, device_type, name, app_version, os_version, last_seen_at, fingerprint)
+                VALUES ($1, 'desktop', $2, '0.0.0', 'unknown', NOW(), $3)
+                ON CONFLICT (device_id) DO UPDATE SET
+                    last_seen_at = NOW(),
+                    -- Re-pairing without a fingerprint must never erase a stored one.
+                    fingerprint = COALESCE(EXCLUDED.fingerprint, devices.fingerprint)
                 """,
                 body.device_id,
                 issued_for or body.device_id,
+                body.fingerprint,
             )
             await conn.execute(
                 """
