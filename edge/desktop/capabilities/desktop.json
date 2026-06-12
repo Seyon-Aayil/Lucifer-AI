@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "Desktop-only grants: the global-shortcut permissions backing the overlay hotkey. Mobile builds omit the plugin, so this capability is platform-scoped.",
+  "platforms": ["macOS", "windows", "linux"],
+  "windows": ["main", "overlay"],
+  "permissions": [
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-is-registered"
+  ]
+}

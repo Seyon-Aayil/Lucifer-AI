@@ -1,12 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability set for Lucifer's main + overlay windows. Grants Tauri core defaults plus the global-shortcut permission needed for ⌘+Space hotkey.",
+  "description": "Core capability set for Lucifer's main + overlay windows on every platform.",
   "windows": ["main", "overlay"],
-  "permissions": [
-    "core:default",
-    "global-shortcut:allow-register",
-    "global-shortcut:allow-unregister",
-    "global-shortcut:allow-is-registered"
-  ]
+  "permissions": ["core:default"]
 }
