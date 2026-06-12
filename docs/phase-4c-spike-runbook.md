@@ -93,10 +93,27 @@ Replace the desktop keychain helper with platform backends: iOS Keychain
 
 | Gate | iOS | Android | Notes |
 |------|-----|---------|-------|
-| 1 build | ☐ | ☐ | |
+| 1 build | ✅ 2026-06-12 | 🟡 2026-06-12 | iOS: app **launched + rendered** on the iOS 26.5 simulator (`tauri ios dev`, vite at :1420). Android: 14.6 MB release APK built; launch pending an AVD/system image or a physical device. |
 | 2 mTLS sync | ☐ | ☐ | |
 | 3 on-device generate | ☐ | ☐ | |
 | 4 secure storage | ☐ | ☐ | |
+
+### Gate 1 field notes (2026-06-12)
+- The desktop crate's bin→lib restructure + capability split landed in PR #24.
+- **Xcode 26.5 componentized-install quirk:** `xcodebuild -downloadPlatform iOS`
+  downloaded the 26.5 simulator runtime but a duplicate registration left the
+  disk image mounted at a `_1`-suffixed path the record didn't point to — the
+  runtime stayed invisible to `simctl list runtimes`, and tauri then refused to
+  build ("Simulator SDK 26.5 is not installed", opening Xcode instead).
+  **Recovery:** `xcrun simctl runtime delete <broken-uuid>`, then
+  `xcodebuild -downloadPlatform iOS -exportPath <dir>` — the export path forces
+  a clean download AND registers the runtime properly.
+- Simulator devices created under an older runtime (iOS 18.6) do not satisfy
+  tauri's SDK check; create one explicitly on the new runtime:
+  `xcrun simctl create Lucifer-iPhone16 "iPhone 16" com.apple.CoreSimulator.SimRuntime.iOS-26-5`.
+- Direct `xcodebuild` against `gen/apple` does NOT work standalone: the
+  "Build Rust Code" phase connects back to a running tauri-CLI orchestration
+  server. Always go through `cargo tauri ios dev/build`.
 
 - **All pass** → flip Phase 4c to **GO** and scope the production mobile app.
 - **2 or 3 fails on a platform** → fall back to RN + Rust-core-via-uniffi for that
