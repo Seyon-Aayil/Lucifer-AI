@@ -15,9 +15,11 @@ streams them back inline.
 
 Payload HMAC contract (field 7, `payload_hmac`):
     HMAC-SHA256(key, SerializeToString(message with payload_hmac cleared)),
-    full 32 bytes, where key = HKDF-SHA256(app_secret_key,
-    info="lucifer-sync-payload-hmac"). An absent MAC is currently allowed
-    (warning logged once per stream) until the edge client adopts the scheme.
+    full 32 bytes, with a per-device key = HKDF-SHA256(app_secret_key,
+    info="lucifer-sync-payload-hmac:" + device_id). Each device gets its own
+    key (provisioned at pairing), so a leaked key can't forge for other
+    devices. An absent MAC is currently allowed (warning logged once per
+    stream) until the edge client adopts the scheme.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ from typing import Any
 import grpc
 
 from master.core.config import get_settings
-from master.core.crypto import hkdf_sha256
+from master.core.crypto import payload_hmac_key as derive_payload_hmac_key
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
 from master.sync.auth import current_caller
@@ -58,8 +60,6 @@ from master.sync.telemetry_sink import TelemetrySink
 log = get_logger(__name__)
 tracer = get_tracer(__name__)
 
-_PAYLOAD_HMAC_INFO = b"lucifer-sync-payload-hmac"
-
 
 class LuciferSyncServicer(_Base):
     """
@@ -75,6 +75,7 @@ class LuciferSyncServicer(_Base):
         audit_logger: Any,
         redis: Any = None,
         payload_hmac_key: bytes | None = None,
+        app_secret_key: str | None = None,
     ) -> None:
         self._graph = graph_client
         self._telemetry_sink = TelemetrySink(db_pool)
@@ -83,9 +84,13 @@ class LuciferSyncServicer(_Base):
         self._js = nats_js
         self._audit = audit_logger
         self._redis = redis
-        self._payload_hmac_key = payload_hmac_key or hkdf_sha256(
-            get_settings().app_secret_key.encode(), info=_PAYLOAD_HMAC_INFO
-        )
+        # `payload_hmac_key`, when given, is a fixed key used for every device
+        # (explicit override, mainly for tests). Otherwise each device gets its
+        # own key derived from `app_secret_key` — bounding the blast radius if
+        # one device's key leaks. The edge receives its key at pairing.
+        self._payload_hmac_key = payload_hmac_key
+        self._app_secret_key = app_secret_key or get_settings().app_secret_key
+        self._device_hmac_keys: dict[str, bytes] = {}
 
     # ── SyncStream ────────────────────────────────────────────────────────────
 
@@ -115,7 +120,7 @@ class LuciferSyncServicer(_Base):
                 if not msg.payload_hmac and not hmac_absent_logged:
                     log.warning("sync.stream.hmac_absent", device_id=device_id)
                     hmac_absent_logged = True
-                if not self._verify_hmac(msg):
+                if not self._verify_hmac(msg, device_id):
                     log.warning("sync.stream.hmac_fail", device_id=device_id)
                     await context.abort(grpc.StatusCode.DATA_LOSS, "payload_hmac invalid")
                     return
@@ -277,12 +282,23 @@ class LuciferSyncServicer(_Base):
 
     # ── Internals ─────────────────────────────────────────────────────────────
 
-    def _verify_hmac(self, msg: SyncMessage) -> bool:
+    def _hmac_key_for(self, device_id: str) -> bytes:
+        """Per-device payload-HMAC key (or the fixed override, if configured)."""
+        if self._payload_hmac_key is not None:
+            return self._payload_hmac_key
+        key = self._device_hmac_keys.get(device_id)
+        if key is None:
+            key = derive_payload_hmac_key(self._app_secret_key, device_id)
+            self._device_hmac_keys[device_id] = key
+        return key
+
+    def _verify_hmac(self, msg: SyncMessage, device_id: str) -> bool:
         """
         Verify the keyed payload HMAC attached to a SyncMessage (see module
         docstring for the contract). The MAC covers the serialised message
-        with the `payload_hmac` field cleared, so it can't cover itself.
-        An absent MAC is allowed — the edge client doesn't send one yet.
+        with the `payload_hmac` field cleared, so it can't cover itself, and is
+        keyed per device. An absent MAC is allowed — the edge client doesn't
+        send one yet.
         """
         if not msg.payload_hmac:
             return True
@@ -290,7 +306,7 @@ class LuciferSyncServicer(_Base):
         clone.CopyFrom(msg)
         clone.ClearField("payload_hmac")
         expected = hmac.new(
-            self._payload_hmac_key, clone.SerializeToString(), hashlib.sha256
+            self._hmac_key_for(device_id), clone.SerializeToString(), hashlib.sha256
         ).digest()
         return hmac.compare_digest(bytes(msg.payload_hmac), expected)
 

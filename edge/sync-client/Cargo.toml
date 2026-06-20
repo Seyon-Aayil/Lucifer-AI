@@ -18,6 +18,8 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+hmac = "0.12"
+sha2 = "0.10"
 
 [build-dependencies]
 tonic-build.workspace = true

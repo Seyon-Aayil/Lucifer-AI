@@ -311,3 +311,88 @@ async def test_auth_rejects_revoked_device(grpc_env) -> None:
             SubgraphRequest(device_id=device, last_sync_at=0), metadata=_md(device)
         )
     assert exc.value.code() == grpc.StatusCode.UNAUTHENTICATED
+
+
+def _device_payload_hmac_key(device_id: str) -> bytes:
+    from master.core.config import get_settings
+    from master.core.crypto import payload_hmac_key
+
+    return payload_hmac_key(get_settings().app_secret_key, device_id)
+
+
+def _sign(msg, key: bytes) -> bytes:
+    import hashlib
+    import hmac
+
+    from master.sync.lucifer_sync_pb2 import SyncMessage
+
+    clone = SyncMessage()
+    clone.CopyFrom(msg)
+    clone.ClearField("payload_hmac")
+    return hmac.new(key, clone.SerializeToString(), hashlib.sha256).digest()
+
+
+async def test_syncstream_accepts_per_device_signed_message(grpc_env) -> None:
+    """A SyncMessage signed with the device's derived key is accepted and the
+    node persists — proving the master derives the same per-device key."""
+    from master.sync.lucifer_sync_pb2 import NodeDelta, SyncMessage
+
+    device = f"{_ID_PREFIX}-dev-signed"
+    node_id = f"{_ID_PREFIX}-node-signed"
+    now_ms = int(time.time() * 1000)
+
+    msg = SyncMessage(
+        device_id=device,
+        sync_session_id="sess-signed",
+        vector_clock=now_ms,
+        node_deltas=[
+            NodeDelta(
+                node_id=node_id,
+                operation="upsert",
+                node_type="Concept",
+                payload=b'{"text":"signed"}',
+                classification="standard",
+                updated_at=now_ms,
+                source_agent="itest",
+            )
+        ],
+    )
+    msg.payload_hmac = _sign(msg, _device_payload_hmac_key(device))
+
+    acks = [r async for r in grpc_env.stub.SyncStream(_one(msg), metadata=_md(device))]
+    assert len(acks) == 1
+    assert acks[0].device_id == "master"
+
+    node = await grpc_env.graph_client.get_node(node_id)
+    assert node["id"] == node_id
+    assert node["text"] == "signed"
+
+
+async def test_syncstream_rejects_bad_signature(grpc_env) -> None:
+    """A SyncMessage with a present-but-wrong MAC is aborted with DATA_LOSS."""
+    from master.sync.lucifer_sync_pb2 import NodeDelta, SyncMessage
+
+    device = f"{_ID_PREFIX}-dev-badsig"
+    now_ms = int(time.time() * 1000)
+
+    msg = SyncMessage(
+        device_id=device,
+        sync_session_id="sess-badsig",
+        vector_clock=now_ms,
+        node_deltas=[
+            NodeDelta(
+                node_id=f"{_ID_PREFIX}-node-badsig",
+                operation="upsert",
+                node_type="Concept",
+                payload=b'{"text":"x"}',
+                classification="standard",
+                updated_at=now_ms,
+                source_agent="itest",
+            )
+        ],
+    )
+    msg.payload_hmac = b"\x00" * 32  # present but invalid
+
+    with pytest.raises(grpc.aio.AioRpcError) as exc:
+        [r async for r in grpc_env.stub.SyncStream(_one(msg), metadata=_md(device))]
+    assert exc.value.code() == grpc.StatusCode.DATA_LOSS

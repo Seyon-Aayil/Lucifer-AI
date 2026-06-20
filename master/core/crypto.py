@@ -75,6 +75,23 @@ def hkdf_sha256(
     ).derive(key_material)
 
 
+_PAYLOAD_HMAC_INFO_PREFIX = b"lucifer-sync-payload-hmac:"
+
+
+def payload_hmac_key(app_secret_key: str, device_id: str) -> bytes:
+    """
+    Per-device key for the SyncMessage payload HMAC. Deriving per device (rather
+    than one global key) bounds the blast radius: a key extracted from one
+    device cannot forge messages for another. Master and edge derive the same
+    32-byte key from the shared `app_secret_key` + the device id; the edge
+    receives its key at pairing.
+    """
+    return hkdf_sha256(
+        app_secret_key.encode(),
+        info=_PAYLOAD_HMAC_INFO_PREFIX + device_id.encode(),
+    )
+
+
 def derive_aes_key(password: str, salt: bytes | None = None) -> tuple[bytes, bytes]:
     """
     Derive a 32-byte AES key from a password using Argon2id.
