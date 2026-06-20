@@ -171,10 +171,17 @@ function Pair({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
       if (!settings.device_id) {
         await ipc.updateSettings({ ...settings, device_id: installId });
       }
+      // Hardware-bound fingerprint (hashed machine id); empty string when
+      // unavailable, which the master treats as a legacy device.
+      const fingerprint = await ipc.deviceFingerprint().catch(() => "");
       const res = await fetch(`${httpEndpoint}/devices/pair`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code: codeStr, device_id: installId }),
+        body: JSON.stringify({
+          code: codeStr,
+          device_id: installId,
+          ...(fingerprint ? { fingerprint } : {}),
+        }),
       });
       if (!res.ok) {
         const detail = await res.text();

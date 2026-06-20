@@ -95,6 +95,8 @@ function mockResponse<T>(cmd: string): T {
       return [] as unknown as T;
     case "local_backend":
       return "ollama" as unknown as T;
+    case "device_fingerprint":
+      return "" as unknown as T;
     default:
       return undefined as unknown as T;
   }
@@ -161,6 +163,7 @@ export const ipc = {
     invoke<void>("forget_device", { deviceId }),
 
   localBackend: () => invoke<string>("local_backend"),
+  deviceFingerprint: () => invoke<string>("device_fingerprint"),
   localGenerate: (model: string, prompt: string) =>
     invoke<string>("local_generate", { model, prompt }),
 
