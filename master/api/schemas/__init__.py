@@ -69,6 +69,11 @@ class RefreshRequest(StrictModel):
 
     refresh_token: str
     device_id: str
+    fingerprint: str | None = Field(
+        None,
+        max_length=256,
+        description="Device hardware fingerprint; checked against the value stored at pairing",
+    )
 
 
 class RevokeRequest(StrictModel):

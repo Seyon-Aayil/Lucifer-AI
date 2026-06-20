@@ -17,8 +17,10 @@ the authoritative device identity.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
+from typing import Any
 
 import grpc
 
@@ -40,7 +42,7 @@ class CallerIdentity:
 current_caller: ContextVar[CallerIdentity | None] = ContextVar("lucifer_sync_caller", default=None)
 
 
-class DeviceAuthInterceptor(grpc.aio.ServerInterceptor):
+class DeviceAuthInterceptor(grpc.aio.ServerInterceptor):  # type: ignore[misc]  # grpc.aio is untyped
     """
     Async gRPC interceptor: validates JWT + revocation.
     Rejects RPCs lacking valid `authorization` metadata.
@@ -51,11 +53,11 @@ class DeviceAuthInterceptor(grpc.aio.ServerInterceptor):
     def __init__(self, revocation_store: RevocationStore) -> None:
         self._revocation = revocation_store
 
-    async def intercept_service(  # type: ignore[override]
+    async def intercept_service(
         self,
-        continuation,
+        continuation: Callable[[grpc.HandlerCallDetails], Awaitable[grpc.RpcMethodHandler | None]],
         handler_call_details: grpc.HandlerCallDetails,
-    ):
+    ) -> grpc.RpcMethodHandler | None:
         metadata = dict(handler_call_details.invocation_metadata or [])
         auth_header = metadata.get("authorization", "")
 
@@ -94,16 +96,7 @@ class DeviceAuthInterceptor(grpc.aio.ServerInterceptor):
     def _reject(cls, message: str) -> grpc.RpcMethodHandler:
         log.warning("sync.auth.rejected", reason=message)
 
-        async def deny_unary_unary(_request, context):
-            await context.abort(cls._UNAUTH, message)
-
-        async def deny_unary_stream(_request, context):
-            await context.abort(cls._UNAUTH, message)
-
-        async def deny_stream_unary(_iterator, context):
-            await context.abort(cls._UNAUTH, message)
-
-        async def deny_stream_stream(_iterator, context):
+        async def deny_unary_unary(_request: Any, context: grpc.aio.ServicerContext) -> None:
             await context.abort(cls._UNAUTH, message)
 
         # Returning a unary_unary handler is sufficient — gRPC will use it
@@ -144,7 +137,9 @@ def _wrap_handler(
 
     if handler.request_streaming and handler.response_streaming:
 
-        async def stream_stream(request_iterator, context):
+        async def stream_stream(
+            request_iterator: AsyncIterator[Any], context: grpc.aio.ServicerContext
+        ) -> AsyncIterator[Any]:
             if not await _verify_peer_cert(context):
                 return
             current_caller.set(identity)
@@ -158,7 +153,9 @@ def _wrap_handler(
         )
     if handler.request_streaming:
 
-        async def stream_unary(request_iterator, context):
+        async def stream_unary(
+            request_iterator: AsyncIterator[Any], context: grpc.aio.ServicerContext
+        ) -> Any:
             if not await _verify_peer_cert(context):
                 return None
             current_caller.set(identity)
@@ -171,7 +168,9 @@ def _wrap_handler(
         )
     if handler.response_streaming:
 
-        async def unary_stream(request, context):
+        async def unary_stream(
+            request: Any, context: grpc.aio.ServicerContext
+        ) -> AsyncIterator[Any]:
             if not await _verify_peer_cert(context):
                 return
             current_caller.set(identity)
@@ -184,7 +183,7 @@ def _wrap_handler(
             response_serializer=handler.response_serializer,
         )
 
-    async def unary_unary(request, context):
+    async def unary_unary(request: Any, context: grpc.aio.ServicerContext) -> Any:
         if not await _verify_peer_cert(context):
             return None
         current_caller.set(identity)
@@ -197,7 +196,7 @@ def _wrap_handler(
     )
 
 
-def _peer_cert_serial(context) -> int | None:
+def _peer_cert_serial(context: grpc.aio.ServicerContext) -> int | None:
     """
     Extract the peer mTLS certificate's serial number from a gRPC servicer
     context. Returns `None` if no peer cert is present (insecure channel

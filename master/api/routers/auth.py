@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from redis.asyncio import Redis
 
 from master.api.schemas import DeviceRegistrationRequest, RefreshRequest, RevokeRequest, TokenPair
+from master.core.auth.device import fingerprint_matches
 from master.core.auth.jwt import (
     create_access_token,
     create_refresh_token,
@@ -134,6 +135,14 @@ async def refresh_token(
             raise HTTPException(status_code=401, detail={"error": "device_revoked"})
 
         async with db.acquire() as conn:
+            stored_fp = await conn.fetchval(
+                "SELECT fingerprint FROM devices WHERE device_id = $1",
+                body.device_id,
+            )
+            if not fingerprint_matches(stored_fp, body.fingerprint):
+                log.warning("auth.fingerprint_mismatch", device_id=body.device_id)
+                raise HTTPException(status_code=401, detail={"error": "fingerprint_mismatch"})
+
             record = await conn.fetchrow(
                 """
                 SELECT id, expires_at, used_at

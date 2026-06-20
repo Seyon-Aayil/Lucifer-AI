@@ -12,11 +12,18 @@ Conflict audit records are appended to the HMAC audit chain via AuditLogger.
 Master-side deltas (Librarian writes since the device's last_seen vector clock)
 are published to NATS `sync.edge.<device_id>` for fan-out; this servicer also
 streams them back inline.
+
+Payload HMAC contract (field 7, `payload_hmac`):
+    HMAC-SHA256(key, SerializeToString(message with payload_hmac cleared)),
+    full 32 bytes, where key = HKDF-SHA256(app_secret_key,
+    info="lucifer-sync-payload-hmac"). An absent MAC is currently allowed
+    (warning logged once per stream) until the edge client adopts the scheme.
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import time
 from collections.abc import AsyncIterator
@@ -24,6 +31,8 @@ from typing import Any
 
 import grpc
 
+from master.core.config import get_settings
+from master.core.crypto import hkdf_sha256
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
 from master.sync.auth import current_caller
@@ -34,14 +43,14 @@ from master.sync.conflict_resolver import (
     candidate_from_node_delta,
 )
 from master.sync.hot_subgraph import HotSubgraphBuilder
-from master.sync.lucifer_sync_pb2 import (  # type: ignore[import]
+from master.sync.lucifer_sync_pb2 import (  # type: ignore[attr-defined]
     AgentResult,
     PushAck,
     ResultBatch,
     SubgraphResponse,
     SyncMessage,
 )
-from master.sync.lucifer_sync_pb2_grpc import (  # type: ignore[import]
+from master.sync.lucifer_sync_pb2_grpc import (
     LuciferSyncServicer as _Base,
 )
 from master.sync.telemetry_sink import TelemetrySink
@@ -49,7 +58,7 @@ from master.sync.telemetry_sink import TelemetrySink
 log = get_logger(__name__)
 tracer = get_tracer(__name__)
 
-_HMAC_KEY_LEN = 32  # AES-256 GCM key length for payload HMAC verification
+_PAYLOAD_HMAC_INFO = b"lucifer-sync-payload-hmac"
 
 
 class LuciferSyncServicer(_Base):
@@ -65,6 +74,7 @@ class LuciferSyncServicer(_Base):
         nats_js: Any,
         audit_logger: Any,
         redis: Any = None,
+        payload_hmac_key: bytes | None = None,
     ) -> None:
         self._graph = graph_client
         self._telemetry_sink = TelemetrySink(db_pool)
@@ -73,19 +83,23 @@ class LuciferSyncServicer(_Base):
         self._js = nats_js
         self._audit = audit_logger
         self._redis = redis
+        self._payload_hmac_key = payload_hmac_key or hkdf_sha256(
+            get_settings().app_secret_key.encode(), info=_PAYLOAD_HMAC_INFO
+        )
 
     # ── SyncStream ────────────────────────────────────────────────────────────
 
     async def SyncStream(  # noqa: N802
         self,
         request_iterator: AsyncIterator[SyncMessage],
-        context: grpc.aio.ServicerContext,  # type: ignore[type-arg]
+        context: grpc.aio.ServicerContext,
     ) -> AsyncIterator[SyncMessage]:
         caller = current_caller.get()
         device_id = caller.device_id if caller else "unknown"
 
         with tracer.start_as_current_span("grpc.sync_stream", attributes={"device_id": device_id}):
             log.info("sync.stream.opened", device_id=device_id)
+            hmac_absent_logged = False
 
             async for msg in request_iterator:
                 if msg.device_id and msg.device_id != device_id:
@@ -97,7 +111,10 @@ class LuciferSyncServicer(_Base):
                     await context.abort(grpc.StatusCode.PERMISSION_DENIED, "device_id mismatch")
                     return
 
-                # Verify HMAC
+                # Verify HMAC (absent MAC allowed until the edge adopts the contract)
+                if not msg.payload_hmac and not hmac_absent_logged:
+                    log.warning("sync.stream.hmac_absent", device_id=device_id)
+                    hmac_absent_logged = True
                 if not self._verify_hmac(msg):
                     log.warning("sync.stream.hmac_fail", device_id=device_id)
                     await context.abort(grpc.StatusCode.DATA_LOSS, "payload_hmac invalid")
@@ -153,7 +170,7 @@ class LuciferSyncServicer(_Base):
     async def GetHotSubgraph(  # noqa: N802
         self,
         request: Any,
-        context: grpc.aio.ServicerContext,  # type: ignore[type-arg]
+        context: grpc.aio.ServicerContext,
     ) -> SubgraphResponse:
         caller = current_caller.get()
         device_id = caller.device_id if caller else request.device_id
@@ -202,7 +219,7 @@ class LuciferSyncServicer(_Base):
     async def PushTelemetry(  # noqa: N802
         self,
         request: Any,
-        context: grpc.aio.ServicerContext,  # type: ignore[type-arg]
+        context: grpc.aio.ServicerContext,
     ) -> PushAck:
         result = await self._telemetry_sink.ingest(request)
         log.debug(
@@ -222,7 +239,7 @@ class LuciferSyncServicer(_Base):
     async def GetPendingResults(  # noqa: N802
         self,
         request: Any,
-        context: grpc.aio.ServicerContext,  # type: ignore[type-arg]
+        context: grpc.aio.ServicerContext,
     ) -> ResultBatch:
         from master.sync.agent_worker import results_key
 
@@ -260,21 +277,22 @@ class LuciferSyncServicer(_Base):
 
     # ── Internals ─────────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _verify_hmac(msg: SyncMessage) -> bool:
+    def _verify_hmac(self, msg: SyncMessage) -> bool:
         """
-        Verify the payload HMAC attached to SyncMessage.
-        Full AES-GCM validation requires the device session key; here we
-        perform a best-effort SHA-256 integrity check on the serialised
-        node+edge deltas. Real mTLS + per-session key derivation is Phase 4b.
+        Verify the keyed payload HMAC attached to a SyncMessage (see module
+        docstring for the contract). The MAC covers the serialised message
+        with the `payload_hmac` field cleared, so it can't cover itself.
+        An absent MAC is allowed — the edge client doesn't send one yet.
         """
         if not msg.payload_hmac:
-            return True  # no HMAC attached — allow (dev/test mode)
-        payload_bytes = (
-            msg.SerializeToString()[::-1]  # crude; replace with proper AEAD in Phase 4b
-        )
-        expected = hashlib.sha256(payload_bytes).digest()[:16]
-        return msg.payload_hmac[:16] == expected
+            return True
+        clone = SyncMessage()
+        clone.CopyFrom(msg)
+        clone.ClearField("payload_hmac")
+        expected = hmac.new(
+            self._payload_hmac_key, clone.SerializeToString(), hashlib.sha256
+        ).digest()
+        return hmac.compare_digest(bytes(msg.payload_hmac), expected)
 
     async def _resolve_node(
         self, delta: Any, vector_clock: int, device_id: str
