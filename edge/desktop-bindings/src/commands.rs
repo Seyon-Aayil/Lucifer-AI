@@ -717,6 +717,11 @@ pub mod __handlers {
     }
 
     #[tauri::command]
+    pub async fn device_fingerprint() -> Result<String, ConnectError> {
+        Ok(crate::fingerprint::device_fingerprint())
+    }
+
+    #[tauri::command]
     pub async fn local_generate(
         handle: State<'_, InferenceHandle>,
         model: String,
@@ -804,6 +809,7 @@ pub mod __handlers {
                 $crate::commands::__handlers::mark_action_failed,
                 $crate::commands::__handlers::list_nodes_by_type,
                 $crate::commands::__handlers::local_backend,
+                $crate::commands::__handlers::device_fingerprint,
                 $crate::commands::__handlers::local_generate,
                 $crate::commands::__handlers::local_generate_stream,
                 $crate::commands::__handlers::persist_pairing_bundle,

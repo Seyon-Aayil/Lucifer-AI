@@ -26,12 +26,14 @@
 //! - `update_jwt(jwt)` — rotate the bearer token without reconnecting
 
 pub mod commands;
+pub mod fingerprint;
 pub mod keychain;
 pub mod refresher;
 pub mod settings;
 pub mod state;
 pub mod types;
 
+pub use fingerprint::device_fingerprint;
 pub use keychain::{
     forget_device, persist_pairing_bundle, read_stored_jwt, PairingBundle, PersistedCredentials,
 };
