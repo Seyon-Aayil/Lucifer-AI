@@ -9,6 +9,7 @@
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod sign;
 pub mod transport;
 
 pub mod proto {
@@ -20,4 +21,5 @@ pub mod proto {
 pub use auth::AuthInterceptor;
 pub use config::ClientConfig;
 pub use error::{Error, Result};
+pub use sign::sign_message;
 pub use transport::SyncClient;

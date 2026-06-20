@@ -33,7 +33,9 @@ message SyncMessage {
   repeated ArtifactRef new_artifacts = 5;
   repeated QueuedAction offline_actions = 6;
   // HMAC-SHA256 over SerializeToString(message with this field cleared),
-  // full 32 bytes. Key = HKDF-SHA256(app_secret_key, info="lucifer-sync-payload-hmac").
+  // full 32 bytes. Per-device key =
+  // HKDF-SHA256(app_secret_key, info="lucifer-sync-payload-hmac:" + device_id);
+  // the edge receives its key at pairing (PairResponse.payload_hmac_key_b64).
   // Optional until edge clients adopt the contract; the master logs absence.
   bytes  payload_hmac  = 7;
   int64  vector_clock  = 8;    // Lamport clock for conflict detection

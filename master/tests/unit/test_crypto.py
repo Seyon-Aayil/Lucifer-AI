@@ -20,6 +20,7 @@ from master.core.crypto import (
     encrypt_str,
     hkdf_sha256,
     hmac_sha256,
+    payload_hmac_key,
     sha256_hex,
     verify_key,
 )
@@ -104,6 +105,27 @@ class TestHKDF:
 
     def test_different_key_material(self) -> None:
         assert hkdf_sha256(b"secret-1", info=b"x") != hkdf_sha256(b"secret-2", info=b"x")
+
+
+class TestPayloadHmacKey:
+    def test_deterministic_32_bytes(self) -> None:
+        k = payload_hmac_key("app-secret", "device-1")
+        assert k == payload_hmac_key("app-secret", "device-1")
+        assert len(k) == 32
+
+    def test_per_device_isolation(self) -> None:
+        assert payload_hmac_key("app-secret", "device-1") != payload_hmac_key(
+            "app-secret", "device-2"
+        )
+
+    def test_depends_on_app_secret(self) -> None:
+        assert payload_hmac_key("secret-a", "device-1") != payload_hmac_key("secret-b", "device-1")
+
+    def test_distinct_from_generic_hkdf(self) -> None:
+        # The domain-separation prefix means it isn't a bare HKDF over the id.
+        assert payload_hmac_key("app-secret", "device-1") != hkdf_sha256(
+            b"app-secret", info=b"device-1"
+        )
 
 
 class TestHMACChain:

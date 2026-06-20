@@ -47,6 +47,7 @@ from master.core.auth.operator import (
 from master.core.auth.rate_limit import FixedWindowRateLimiter
 from master.core.auth.revocation import RevocationStore
 from master.core.config import get_settings
+from master.core.crypto import payload_hmac_key as derive_payload_hmac_key
 from master.core.exceptions import InvalidTokenError, TokenExpiredError
 from master.core.logging import get_logger
 
@@ -145,6 +146,10 @@ class PairResponse(BaseModel):
     cert_serial_number_hex: str
     cert_not_after: str
     common_name: str
+    # Per-device key for the SyncMessage payload HMAC (base64, 32 bytes). The
+    # edge signs outbound SyncMessages with this; the master derives the same
+    # key from app_secret_key + device_id. See master/sync/server.py.
+    payload_hmac_key_b64: str
 
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
@@ -406,6 +411,9 @@ async def pair_device(
         cert_serial_number_hex=hex(creds.serial_number),
         cert_not_after=creds.not_after.isoformat(),
         common_name=creds.common_name,
+        payload_hmac_key_b64=base64.b64encode(
+            derive_payload_hmac_key(settings.app_secret_key, body.device_id)
+        ).decode(),
     )
 
 
