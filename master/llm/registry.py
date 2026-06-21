@@ -51,8 +51,8 @@ class ProviderRegistry:
         self,
         providers: list[LLMProvider],
         routellm_threshold: float = 0.5,
-        strong_model_id: str = "anthropic-claude-opus-4",
-        weak_model_id: str = "anthropic-claude-haiku-4",
+        strong_model_id: str = "anthropic-claude-opus-4-8",
+        weak_model_id: str = "anthropic-claude-haiku-4-5",
     ) -> None:
         self._providers: dict[str, LLMProvider] = {p.provider_id: p for p in providers}
         self._breakers: dict[str, CircuitBreaker] = {
@@ -91,7 +91,7 @@ class ProviderRegistry:
         providers: list[LLMProvider] = []
 
         if settings.anthropic_api_key:
-            for model in ("claude-opus-4", "claude-sonnet-4-5", "claude-haiku-4"):
+            for model in ("claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"):
                 providers.append(
                     AnthropicProvider(
                         model=model,
@@ -116,7 +116,7 @@ class ProviderRegistry:
                 )
 
         if settings.google_api_key:
-            for model in ("gemini-1.5-pro", "gemini-1.5-flash"):
+            for model in ("gemini-2.5-pro", "gemini-2.0-flash"):
                 providers.append(
                     GoogleProvider(
                         model=model,

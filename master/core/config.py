@@ -81,8 +81,8 @@ class Settings(BaseSettings):
 
     # ── RouteLLM ───────────────────────────────────────────────────────────
     routellm_threshold: float = Field(0.5, ge=0.0, le=1.0)
-    routellm_strong_model: str = "anthropic/claude-opus-4"
-    routellm_weak_model: str = "anthropic/claude-haiku-4"
+    routellm_strong_model: str = "anthropic/claude-opus-4-8"
+    routellm_weak_model: str = "anthropic/claude-haiku-4-5"
 
     # ── LLM Providers ──────────────────────────────────────────────────────
     anthropic_api_key: str | None = None
@@ -153,7 +153,7 @@ class Settings(BaseSettings):
     model_upgrade_candidates: list[str] = Field(default_factory=list)
     # Use an LLM-as-judge scorer instead of exact-substring golden matching.
     model_upgrade_use_judge: bool = False
-    model_upgrade_judge_model: str = "anthropic/claude-haiku-4"
+    model_upgrade_judge_model: str = "anthropic/claude-haiku-4-5"
     # Replay real captured traffic (query_log) instead of the golden set.
     model_upgrade_use_replay: bool = False
 

@@ -175,7 +175,6 @@ class ResearchAgent(BaseAgent):
             messages=messages,
             model=provider.provider_id.split("-", 1)[-1],
             max_tokens=request.token_budget.output_limit,
-            temperature=0.5,
         )
         response = await self._llm.complete_with_retry(provider, completion_req)
         return response.content, []

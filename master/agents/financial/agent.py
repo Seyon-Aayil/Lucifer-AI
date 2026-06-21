@@ -97,10 +97,48 @@ class FinancialAgent(BaseAgent):
         return await handler(request)  # type: ignore[no-any-return]
 
     async def _check_budget(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
-        # Phase 3: query SpendTracker / local financial store
+        """
+        Read Financial nodes and report an aggregate budget-vs-spend status.
+
+        Reports rounded totals only — never raw account numbers or per-account
+        balances (see the agent's RESTRICTED-data rules above).
+        """
+        from master.agents.librarian.graph_client import GraphClient
+
+        try:
+            gc = GraphClient.from_settings()
+            try:
+                nodes = await gc.list_nodes_by_type("Financial", limit=500, order_by="updatedAt")
+            finally:
+                await gc.close()
+        except Exception as exc:
+            log.warning("financial_agent.read_failed", error=str(exc))
+            return "Budget check: financial data is temporarily unavailable.", []
+
+        if not nodes:
+            return "Budget check: no budget data on file yet.", []
+
+        def _amount(n: dict[str, Any]) -> float:
+            raw = n.get("amount", 0)
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return 0.0
+
+        budget = sum(_amount(n) for n in nodes if n.get("kind") == "budget")
+        spend = sum(_amount(n) for n in nodes if n.get("kind") in ("spend", "transaction"))
+
+        if budget <= 0:
+            return (
+                f"Budget check: {len(nodes)} financial record(s) on file; no budget target set.",
+                [],
+            )
+        remaining = budget - spend
+        status = "within budget" if remaining >= 0 else "over budget"
         return (
-            "Budget check: financial data store integration pending. "
-            "Current daily LLM spend is tracked via SpendTracker.",
+            f"Budget check: {status}. "
+            f"Spent ≈ {round(spend, 2)} of {round(budget, 2)} "
+            f"(≈ {round(remaining, 2)} remaining).",
             [],
         )
 
@@ -143,7 +181,6 @@ class FinancialAgent(BaseAgent):
             messages=messages,
             model=provider.provider_id.split("-", 1)[-1],
             max_tokens=request.token_budget.output_limit,
-            temperature=0.3,
         )
         response = await self._llm.complete_with_retry(provider, completion_req)
         return response.content, []

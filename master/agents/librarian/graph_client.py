@@ -104,6 +104,39 @@ class GraphClient:
                 id=node_id,
             )
 
+    # Properties an agent may order a typed-node read by. Allow-listed to keep
+    # the order_by clause out of injection range (the property name is
+    # interpolated into Cypher, not parameterised).
+    _ORDER_BY_ALLOWLIST: frozenset[str] = frozenset(
+        {"decayScore", "relevance_score", "published_at", "updatedAt"}
+    )
+
+    async def list_nodes_by_type(
+        self,
+        node_type: str,
+        limit: int = 10,
+        order_by: str = "decayScore",
+    ) -> list[dict[str, Any]]:
+        """
+        Return up to `limit` non-deleted nodes of the given type, ordered by
+        `order_by` descending. Both `node_type` (against NodeType) and `order_by`
+        (against an allow-list) are validated to prevent Cypher injection.
+        """
+        self._validate_identifier(node_type, NodeType)
+        if order_by not in self._ORDER_BY_ALLOWLIST:
+            log.error("graph.security.invalid_order_by", order_by=order_by)
+            raise ValueError(f"Unauthorized order_by property: {order_by}")
+
+        with tracer.start_as_current_span("neo4j.list_nodes_by_type"):
+            async with self._driver.session() as session:
+                result = await session.run(
+                    f"MATCH (n:{node_type}) WHERE n.deletedAt IS NULL "
+                    f"RETURN n ORDER BY n.{order_by} DESC LIMIT $limit",
+                    limit=limit,
+                )
+                records = await result.data()
+                return [dict(r["n"]) for r in records]
+
     # ── Edge CRUD ────────────────────────────────────────────────────────────
 
     async def upsert_edge(

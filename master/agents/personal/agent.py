@@ -118,7 +118,6 @@ class PersonalAgent(BaseAgent):
             messages=messages,
             model=provider.provider_id.split("-", 1)[-1],  # strip prefix
             max_tokens=request.token_budget.output_limit,
-            temperature=0.7,
         )
         response = await self._llm.complete_with_retry(provider, completion_req)
         return response.content, []
@@ -161,9 +160,55 @@ class PersonalAgent(BaseAgent):
         return f"Meeting scheduled: {create_result.output}", []
 
     async def _daily_briefing(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
-        """Compile the daily briefing: top news + calendar + pending tasks."""
-        briefing = "# Daily Briefing\n\n"
-        briefing += "📅 **Calendar**: (fetching via GCal MCP — Phase 3)\n\n"
-        briefing += "📰 **News**: (fetching via News Engine — Phase 3)\n\n"
-        briefing += "✅ **Tasks**: (fetching from Librarian — Phase 3)\n"
-        return briefing, []
+        """Compile the daily briefing: calendar + top news + pending tasks."""
+        sections = ["# Daily Briefing\n"]
+        sections.append(await self._briefing_calendar())
+        sections.append(await self._briefing_news())
+        sections.append(await self._briefing_tasks())
+        return "\n".join(sections), []
+
+    async def _briefing_calendar(self) -> str:
+        """Upcoming calendar events via the GCal MCP (graceful when unavailable)."""
+        if self._mcp is None:
+            return "📅 **Calendar**: (calendar source unavailable)\n"
+        result = await self._mcp.invoke("gcal", "list_events", {"max_results": 5})
+        if not result.success:
+            return "📅 **Calendar**: (could not fetch events)\n"
+        events: list[dict[str, Any]] = result.output or []
+        if not events:
+            return "📅 **Calendar**: nothing scheduled.\n"
+        lines = [
+            f"- {e.get('summary', '(no title)')} — {e.get('start', {}).get('dateTime', 'TBD')}"
+            for e in events
+        ]
+        return "📅 **Calendar**:\n" + "\n".join(lines) + "\n"
+
+    async def _briefing_news(self) -> str:
+        """Top news digest nodes written by the NewsPipeline."""
+        nodes = await self._read_nodes("News", limit=5, order_by="decayScore")
+        if not nodes:
+            return "📰 **News**: no digest available.\n"
+        lines = [f"- {n.get('title', '(untitled)')}" for n in nodes]
+        return "📰 **News**:\n" + "\n".join(lines) + "\n"
+
+    async def _briefing_tasks(self) -> str:
+        """Pending Task nodes from the graph."""
+        nodes = await self._read_nodes("Task", limit=5, order_by="updatedAt")
+        if not nodes:
+            return "✅ **Tasks**: nothing pending.\n"
+        lines = [f"- {n.get('title') or n.get('summary', '(task)')}" for n in nodes]
+        return "✅ **Tasks**:\n" + "\n".join(lines) + "\n"
+
+    async def _read_nodes(self, node_type: str, limit: int, order_by: str) -> list[dict[str, Any]]:
+        """Read typed nodes from Neo4j, degrading gracefully on any error."""
+        from master.agents.librarian.graph_client import GraphClient
+
+        try:
+            gc = GraphClient.from_settings()
+            try:
+                return await gc.list_nodes_by_type(node_type, limit=limit, order_by=order_by)
+            finally:
+                await gc.close()
+        except Exception as exc:
+            log.warning("personal_agent.read_failed", node_type=node_type, error=str(exc))
+            return []

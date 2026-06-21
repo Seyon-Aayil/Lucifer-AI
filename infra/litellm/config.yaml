@@ -1,13 +1,13 @@
 model_list:
   # ── Strong / Master Tier ──────────────────────────────────────────────────
-  - model_name: claude-opus-4
+  - model_name: claude-opus-4-8
     litellm_params:
-      model: anthropic/claude-opus-4
+      model: anthropic/claude-opus-4-8
       api_key: os.environ/ANTHROPIC_API_KEY
 
-  - model_name: claude-sonnet-4
+  - model_name: claude-sonnet-4-6
     litellm_params:
-      model: anthropic/claude-sonnet-4-5
+      model: anthropic/claude-sonnet-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
 
   - model_name: gpt-4o
@@ -17,13 +17,13 @@ model_list:
 
   - model_name: gemini-pro
     litellm_params:
-      model: google/gemini-1.5-pro
+      model: google/gemini-2.5-pro
       api_key: os.environ/GEMINI_API_KEY
 
   # ── Weak / Cost-Efficient Tier ────────────────────────────────────────────
-  - model_name: claude-haiku-4
+  - model_name: claude-haiku-4-5
     litellm_params:
-      model: anthropic/claude-haiku-4
+      model: anthropic/claude-haiku-4-5
       api_key: os.environ/ANTHROPIC_API_KEY
 
   - model_name: gpt-4o-mini

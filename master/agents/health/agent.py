@@ -86,17 +86,59 @@ class HealthAgent(BaseAgent):
         handler = handlers.get(request.intent, self._health_query)
         return await handler(request)  # type: ignore[no-any-return]
 
+    async def _read_health_records(self, category: str) -> list[dict[str, Any]]:
+        """
+        Read HealthRecord nodes for a category from Neo4j.
+
+        Records are synced from the edge HealthKit store (future: read the edge
+        store directly; Neo4j HealthRecord nodes are the implemented path). The
+        `category` is matched against the node's `category`/`type` attribute.
+        """
+        from master.agents.librarian.graph_client import GraphClient
+
+        try:
+            gc = GraphClient.from_settings()
+            try:
+                nodes = await gc.list_nodes_by_type("HealthRecord", limit=200, order_by="updatedAt")
+            finally:
+                await gc.close()
+        except Exception as exc:
+            log.warning("health_agent.records_read_failed", category=category, error=str(exc))
+            return []
+        return [n for n in nodes if (n.get("category") or n.get("type")) == category]
+
+    @staticmethod
+    def _aggregate(records: list[dict[str, Any]]) -> str:
+        """Aggregate numeric `value` fields — never echo individual raw readings."""
+        values = [
+            float(n["value"])
+            for n in records
+            if isinstance(n.get("value"), (int, float))
+            or (isinstance(n.get("value"), str) and n["value"].replace(".", "", 1).isdigit())
+        ]
+        if not values:
+            return f"{len(records)} record(s) on file."
+        avg = sum(values) / len(values)
+        return f"{len(records)} record(s); aggregate average ≈ {round(avg, 1)}."
+
     async def _activity_summary(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
-        # Phase 3: read from local HealthKit store and summarise
-        return "Activity summary: HealthKit local store integration pending Phase 3.", []
+        records = await self._read_health_records("activity")
+        if not records:
+            return "Activity summary: no recent activity data available.", []
+        return f"Activity summary: {self._aggregate(records)}", []
 
     async def _sleep_summary(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
-        # Phase 3: read sleep data from local HealthKit store
-        return "Sleep summary: HealthKit local store integration pending Phase 3.", []
+        records = await self._read_health_records("sleep")
+        if not records:
+            return "Sleep summary: no recent sleep data available.", []
+        return f"Sleep summary: {self._aggregate(records)}", []
 
     async def _medication_reminder(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
-        # Phase 3: read medication schedule from local store
-        return "Medication reminders: local schedule store integration pending Phase 3.", []
+        records = await self._read_health_records("medication")
+        if not records:
+            return "Medication reminders: no scheduled medications on file.", []
+        # Privacy: never name the medications — report the count of scheduled items only.
+        return f"Medication reminders: {len(records)} scheduled item(s) on your list.", []
 
     async def _health_query(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         context_summary = request.context_package.summary or ""
@@ -129,7 +171,6 @@ class HealthAgent(BaseAgent):
             messages=messages,
             model=provider.provider_id.split("-", 1)[-1],
             max_tokens=request.token_budget.output_limit,
-            temperature=0.4,
         )
         response = await self._llm.complete_with_retry(provider, completion_req)
         return response.content, []
