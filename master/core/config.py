@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     routellm_threshold: float = Field(0.5, ge=0.0, le=1.0)
     routellm_strong_model: str = "anthropic/claude-opus-4-8"
     routellm_weak_model: str = "anthropic/claude-haiku-4-5"
+    # When a cloud (MASTER-tier) provider refuses a benign request on safety
+    # grounds, transparently re-serve it once on the strong model.
+    refusal_fallback_enabled: bool = True
 
     # ── LLM Providers ──────────────────────────────────────────────────────
     anthropic_api_key: str | None = None

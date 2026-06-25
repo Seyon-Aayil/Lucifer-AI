@@ -41,6 +41,15 @@ log = get_logger(__name__)
 tracer = get_tracer(__name__)
 
 
+def _is_refusal(response: CompletionResponse) -> bool:
+    """
+    True if the response is a safety refusal. LiteLLM maps Anthropic
+    stop_reason="refusal" (and Google/OpenAI safety blocks) to
+    finish_reason="content_filter".
+    """
+    return response.finish_reason == "content_filter"
+
+
 class ProviderRegistry:
     """
     Registry for all available LLM providers.
@@ -54,6 +63,7 @@ class ProviderRegistry:
         routellm_threshold: float = 0.5,
         strong_model_id: str = "anthropic-claude-opus-4-8",
         weak_model_id: str = "anthropic-claude-haiku-4-5",
+        refusal_fallback: bool = True,
     ) -> None:
         self._providers: dict[str, LLMProvider] = {p.provider_id: p for p in providers}
         self._breakers: dict[str, CircuitBreaker] = {
@@ -62,6 +72,7 @@ class ProviderRegistry:
         self._routellm_threshold = routellm_threshold
         self._strong_model_id = strong_model_id
         self._weak_model_id = weak_model_id
+        self._refusal_fallback = refusal_fallback
         # Lazy-loaded RouteLLM controller
         self._routellm: Any | None = None
 
@@ -142,6 +153,7 @@ class ProviderRegistry:
             routellm_threshold=settings.routellm_threshold,
             strong_model_id=f"anthropic-{settings.routellm_strong_model.split('/')[-1]}",
             weak_model_id=f"anthropic-{settings.routellm_weak_model.split('/')[-1]}",
+            refusal_fallback=settings.refusal_fallback_enabled,
         )
 
     async def _routellm_score(self, query: str) -> float:
@@ -264,6 +276,36 @@ class ProviderRegistry:
         if provider_id in self._breakers:
             await self._breakers[provider_id].record_success()
 
+    async def _record_spend(
+        self,
+        spend_tracker: Any | None,
+        agent_id: str | None,
+        provider: LLMProvider,
+        response: CompletionResponse,
+    ) -> None:
+        """Record actual spend for a completed call, if a tracker is wired."""
+        if spend_tracker and agent_id:
+            cost = (
+                response.token_usage.input_tokens * provider.cost_per_input_token
+                + response.token_usage.output_tokens * provider.cost_per_output_token
+            )
+            await spend_tracker.record_spend(agent_id, cost)
+
+    def _should_refusal_fallback(self, provider: LLMProvider, response: CompletionResponse) -> bool:
+        """
+        Whether a safety refusal should be re-served on the strong model.
+
+        Gated to MASTER (cloud) providers so local-only calls (e.g. the health
+        agent's Ollama path) are never re-routed to a cloud model. No fallback
+        when the strong model itself refused (terminal).
+        """
+        return (
+            self._refusal_fallback
+            and _is_refusal(response)
+            and provider.tier == ProviderTier.MASTER
+            and provider.provider_id != self._strong_model_id
+        )
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
     async def complete_with_retry(
         self,
@@ -285,14 +327,24 @@ class ProviderRegistry:
         try:
             response = await provider.complete(request)
             await self.report_success(provider.provider_id)
+            await self._record_spend(spend_tracker, agent_id, provider, response)
 
-            # ── Record actual spend ────────────────────────────────────────────
-            if spend_tracker and agent_id:
-                actual_cost = (
-                    response.token_usage.input_tokens * provider.cost_per_input_token
-                    + response.token_usage.output_tokens * provider.cost_per_output_token
-                )
-                await spend_tracker.record_spend(agent_id, actual_cost)
+            # ── Refusal fallback ────────────────────────────────────────────────
+            # A safety refusal is a successful 200 (not an exception), so it is
+            # handled here, after the call. Re-serve once on the strong model.
+            if self._should_refusal_fallback(provider, response):
+                fb = self._providers.get(self._strong_model_id)
+                if fb is not None and await self._breakers[fb.provider_id].can_proceed():
+                    log.info(
+                        "llm.refusal_fallback",
+                        from_provider=provider.provider_id,
+                        to_provider=fb.provider_id,
+                        agent=agent_id,
+                    )
+                    fb_response = await fb.complete(request)
+                    await self.report_success(fb.provider_id)
+                    await self._record_spend(spend_tracker, agent_id, fb, fb_response)
+                    return fb_response
 
             return response
         except Exception as exc:
