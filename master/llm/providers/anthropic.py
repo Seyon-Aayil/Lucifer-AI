@@ -48,10 +48,40 @@ _MODEL_COSTS: dict[str, tuple[float, float]] = {
 # HTTP 400. Matched as substrings against the model id.
 _NO_SAMPLING_PARAM_MARKERS: tuple[str, ...] = ("opus-4-8", "opus-4-7", "fable")
 
+# Models that support the reasoning-effort dial + adaptive thinking. Effort
+# errors on Sonnet 4.5 / Haiku 4.5 and earlier, so this set is narrower.
+_EFFORT_MARKERS: tuple[str, ...] = (
+    "opus-4-5",
+    "opus-4-6",
+    "opus-4-7",
+    "opus-4-8",
+    "sonnet-4-6",
+    "fable",
+)
+
+# Models that support structured outputs (output_config.format / response_format).
+# Note Haiku 4.5 supports this but NOT effort — hence a separate gate.
+_STRUCTURED_OUTPUT_MARKERS: tuple[str, ...] = (
+    "opus-4",
+    "sonnet-4-6",
+    "haiku-4-5",
+    "fable",
+)
+
 
 def _omit_sampling_params(model: str) -> bool:
     """Return True if sampling params must be omitted for this model (else 400)."""
     return any(marker in model for marker in _NO_SAMPLING_PARAM_MARKERS)
+
+
+def _supports_effort(model: str) -> bool:
+    """Return True if the model accepts output_config.effort + adaptive thinking."""
+    return any(marker in model for marker in _EFFORT_MARKERS)
+
+
+def _supports_structured_outputs(model: str) -> bool:
+    """Return True if the model accepts schema-constrained JSON output."""
+    return any(marker in model for marker in _STRUCTURED_OUTPUT_MARKERS)
 
 
 class AnthropicProvider(LLMProvider):
@@ -108,6 +138,27 @@ class AnthropicProvider(LLMProvider):
     def max_context_tokens(self) -> int:
         return self._max_context
 
+    def _reasoning_kwargs(self, request: CompletionRequest) -> dict[str, Any]:
+        """
+        Build the model-gated request-shaping kwargs (effort + adaptive thinking,
+        structured outputs). Each is included only when the model supports it,
+        so unsupported models never 400.
+        """
+        extra: dict[str, Any] = {}
+        if request.effort and _supports_effort(self._model):
+            extra["output_config"] = {"effort": request.effort}
+            extra["thinking"] = {"type": "adaptive"}
+        if request.response_schema and _supports_structured_outputs(self._model):
+            extra["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_output",
+                    "schema": request.response_schema,
+                    "strict": True,
+                },
+            }
+        return extra
+
     def _build_litellm_messages(self, request: CompletionRequest) -> list[dict[str, Any]]:
         messages = []
         for msg in request.messages:
@@ -140,6 +191,7 @@ class AnthropicProvider(LLMProvider):
             # Current Opus models (4.8/4.7) 400 on sampling params — omit them.
             if not _omit_sampling_params(self._model):
                 kwargs["temperature"] = request.temperature
+            kwargs.update(self._reasoning_kwargs(request))
             resp = await litellm.acompletion(**kwargs)
             latency_ms = int((time.monotonic() - start) * 1000)
 
@@ -190,6 +242,7 @@ class AnthropicProvider(LLMProvider):
         # Current Opus models (4.8/4.7) 400 on sampling params — omit them.
         if not _omit_sampling_params(self._model):
             kwargs["temperature"] = request.temperature
+        kwargs.update(self._reasoning_kwargs(request))
         async for chunk in await litellm.acompletion(**kwargs):
             delta = chunk.choices[0].delta.content or ""
             finish = chunk.choices[0].finish_reason

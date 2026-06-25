@@ -146,15 +146,17 @@ class CodingAgent(BaseAgent):
     async def _llm_complete(
         self, request: AgentRequest, messages: list[Message]
     ) -> tuple[str, list[MemoryDelta]]:
-        provider = await self._llm.select(
+        selection = await self._llm.select(
             query=request.raw_input,
             agent_id=self.AGENT_ID,
             max_budget_usd=request.token_budget.max_cost_usd,
         )
+        provider = selection.provider
         completion_req = CompletionRequest(
             messages=messages,
             model=provider.provider_id.split("-", 1)[-1],
             max_tokens=request.token_budget.output_limit,
+            effort=selection.effort,
         )
         response = await self._llm.complete_with_retry(provider, completion_req)
         return response.content, []

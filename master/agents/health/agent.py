@@ -156,21 +156,24 @@ class HealthAgent(BaseAgent):
     ) -> tuple[str, list[MemoryDelta]]:
         """Force local Ollama model — health data must never reach cloud APIs."""
         settings = get_settings()
-        provider = await self._llm.select(
+        selection = await self._llm.select(
             query=request.raw_input,
             agent_id=self.AGENT_ID,
             max_budget_usd=request.token_budget.max_cost_usd,
             preferred_provider="ollama",  # enforce local inference
         )
+        provider = selection.provider
         log.info(
             "health_agent.llm_local",
             provider=provider.provider_id,
             ollama_url=settings.ollama_base_url,
         )
+        # Local Ollama ignores the effort dial; pass it through for uniformity.
         completion_req = CompletionRequest(
             messages=messages,
             model=provider.provider_id.split("-", 1)[-1],
             max_tokens=request.token_budget.output_limit,
+            effort=selection.effort,
         )
         response = await self._llm.complete_with_retry(provider, completion_req)
         return response.content, []

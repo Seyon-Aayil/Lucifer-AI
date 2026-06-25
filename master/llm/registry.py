@@ -33,6 +33,7 @@ from master.llm.interfaces import (
     CompletionRequest,
     CompletionResponse,
     LLMProvider,
+    ProviderSelection,
     ProviderTier,
 )
 
@@ -167,6 +168,22 @@ class ProviderRegistry:
             log.warning("routellm.score.failed", error=str(exc))
             return 0.5  # Default to ambiguous
 
+    def complexity_to_effort(self, score: float) -> str | None:
+        """
+        Map a RouteLLM complexity score (0.0–1.0) to a reasoning-effort level.
+
+        Returns None below the routing threshold (the weak tier is chosen and
+        does not support the effort dial). Above the threshold, sub-buckets the
+        strong tier so cheap-but-complex queries don't pay full effort.
+        """
+        if score < self._routellm_threshold:
+            return None
+        if score < 0.7:
+            return "medium"
+        if score < 0.85:
+            return "high"
+        return "xhigh"
+
     async def select(
         self,
         query: str,
@@ -174,26 +191,29 @@ class ProviderRegistry:
         required_capabilities: set[Capability] | None = None,
         agent_id: str = "unknown",
         max_budget_usd: float = 1.0,
-    ) -> LLMProvider:
+    ) -> ProviderSelection:
         """
         Select the most appropriate provider for a request.
-        1. RouteLLM scores complexity → selects preferred model.
+        1. RouteLLM scores complexity → selects preferred model + effort level.
         2. Filters candidates by tier + capabilities + circuit state + budget.
         3. Falls back through chain if preferred is unavailable.
+        Returns the provider plus the reasoning effort derived from the score.
         Raises: NoSuitableProviderError if no provider can serve the request.
         """
         with tracer.start_as_current_span("llm.registry.select"):
             caps = required_capabilities or {Capability.TEXT}
 
-            # RouteLLM: pick preferred provider ID
+            # RouteLLM: pick preferred provider ID + effort level
             score = await self._routellm_score(query)
             preferred_id = (
                 self._strong_model_id if score >= self._routellm_threshold else self._weak_model_id
             )
+            effort = self.complexity_to_effort(score)
             log.debug(
                 "routellm.route",
                 score=round(score, 3),
                 preferred=preferred_id,
+                effort=effort,
                 agent=agent_id,
             )
 
@@ -205,7 +225,7 @@ class ProviderRegistry:
                 if not await breaker.can_proceed():
                     log.debug("llm.provider.circuit_open", provider=provider.provider_id)
                     continue
-                return provider
+                return ProviderSelection(provider=provider, effort=effort)
 
             raise NoSuitableProviderError(
                 f"No healthy provider for tier={tier}, caps={caps}, agent={agent_id}"

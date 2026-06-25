@@ -369,6 +369,7 @@ async def _ollama_intent_classifier(raw_input: str) -> tuple[str, str, RiskTier]
     Falls back to rule-based classifier on any error or timeout.
     """
     from master.core.config import get_settings
+    from master.orchestrator.schemas import IntentClassification
 
     settings = get_settings()
     prompt = _INTENT_CLASSIFIER_PROMPT.format(raw_input=raw_input)
@@ -376,16 +377,18 @@ async def _ollama_intent_classifier(raw_input: str) -> tuple[str, str, RiskTier]
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.post(
                 f"{settings.ollama_base_url}/api/generate",
-                json={"model": "mistral", "prompt": prompt, "stream": False, "format": "json"},
+                json={
+                    "model": "mistral",
+                    "prompt": prompt,
+                    "stream": False,
+                    # Constrain the local model to the classification schema.
+                    "format": IntentClassification.model_json_schema(),
+                },
             )
             resp.raise_for_status()
             result: dict[str, Any] = json.loads(resp.json().get("response", "{}"))
-            intent = result.get("intent", "chat")
-            agent_id = result.get("agent_id", "personal-agent")
-            risk_str = result.get("risk_tier", "low")
-            valid_risk = {t.value for t in RiskTier}
-            risk_tier = RiskTier(risk_str) if risk_str in valid_risk else RiskTier.LOW
-            return intent, agent_id, risk_tier
+            parsed = IntentClassification.model_validate(result)
+            return parsed.intent, parsed.agent_id, parsed.risk_tier
     except Exception as exc:
         log.debug("orchestrator.classify.ollama_fallback", error=str(exc))
         return _simple_intent_classifier(raw_input)

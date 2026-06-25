@@ -11,6 +11,7 @@ and the pure parser (`parse_judge_score`) is unit-testable without the dependenc
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -25,25 +26,46 @@ ScoreFn = Callable[[str, str], Awaitable[float]]
 _JUDGE_TEMPLATE = (
     "You are grading the quality of an assistant RESPONSE to a PROMPT. "
     "Rate it on a 0-10 integer scale where 10 is excellent (correct, relevant, "
-    "helpful) and 0 is useless or wrong. Reply with ONLY the number.\n\n"
+    'helpful) and 0 is useless or wrong. Reply with ONLY JSON: {{"score": <0-10>}}.\n\n'
     "PROMPT:\n{prompt}\n\nRESPONSE:\n{response}\n\nScore:"
 )
+
+# Structured-output schema: a single integer score. Range is clamped client-side
+# (structured outputs do not support numeric minimum/maximum constraints).
+_SCORE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"score": {"type": "integer"}},
+    "required": ["score"],
+    "additionalProperties": False,
+}
 
 _NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
 
 def parse_judge_score(text: str) -> float:
     """
-    Extract the first number from the judge's reply and normalise 0-10 → 0.0-1.0.
-    Non-numeric or empty replies score 0.0; values are clamped to [0, 1].
+    Parse the judge's reply into a normalised 0.0-1.0 quality score.
+
+    Prefers a structured `{"score": N}` JSON object; falls back to extracting the
+    first number from free text. Non-numeric or empty replies score 0.0; values
+    are normalised 0-10 → 0.0-1.0 and clamped to [0, 1].
     """
-    match = _NUM_RE.search(text or "")
-    if not match:
-        return 0.0
+    text = text or ""
+    raw: float | None = None
     try:
-        raw = float(match.group())
-    except ValueError:
-        return 0.0
+        obj = json.loads(text)
+        if isinstance(obj, dict) and isinstance(obj.get("score"), (int, float)):
+            raw = float(obj["score"])
+    except (ValueError, TypeError):
+        raw = None
+    if raw is None:
+        match = _NUM_RE.search(text)
+        if not match:
+            return 0.0
+        try:
+            raw = float(match.group())
+        except ValueError:
+            return 0.0
     return max(0.0, min(1.0, raw / 10.0))
 
 
@@ -64,8 +86,16 @@ def make_llm_judge_score(settings: Any, judge_model: str) -> ScoreFn:
                 ],
                 api_base=settings.litellm_proxy_url,
                 api_key=settings.litellm_master_key,
-                max_tokens=8,
+                max_tokens=32,
                 temperature=0.0,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "judge_score",
+                        "schema": _SCORE_SCHEMA,
+                        "strict": True,
+                    },
+                },
             )
             return parse_judge_score(resp.choices[0].message.content or "")
         except Exception as exc:  # noqa: BLE001 — a judge failure must not abort the cycle
