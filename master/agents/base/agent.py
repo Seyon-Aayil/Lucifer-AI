@@ -148,6 +148,7 @@ class AgentRequest:
     surface: AgentSurface
     trace_id: str
     raw_input: str = ""
+    user_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -160,6 +161,7 @@ class AgentRequest:
         context_package: ContextPackage,
         risk_tier: RiskTier = RiskTier.LOW,
         trace_id: str | None = None,
+        user_id: str | None = None,
     ) -> AgentRequest:
         """Convenience factory for tests and the orchestrator."""
         return cls(
@@ -172,6 +174,7 @@ class AgentRequest:
             surface=surface,
             trace_id=trace_id or str(uuid.uuid4()),
             raw_input=raw_input,
+            user_id=user_id,
         )
 
 

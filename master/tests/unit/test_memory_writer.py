@@ -63,6 +63,19 @@ async def test_public_writes_all_three_stores(writer, mock_graph_client):
 
 
 @pytest.mark.asyncio
+async def test_user_id_forwarded_to_cloud_stores(writer, mock_graph_client):
+    await writer.apply_deltas([_delta("standard")], user_id="alice")
+    assert writer._mem0.add.await_args.kwargs["user_id"] == "alice"
+    assert writer._zep.add_episode.await_args.kwargs["user_id"] == "alice"
+
+
+@pytest.mark.asyncio
+async def test_user_id_defaults_to_single_operator(writer, mock_graph_client):
+    await writer.apply_deltas([_delta("standard")])
+    assert writer._mem0.add.await_args.kwargs["user_id"] == "lucifer-user"
+
+
+@pytest.mark.asyncio
 async def test_restricted_skips_mem0(writer, mock_graph_client):
     await writer.apply_deltas([_delta("restricted")])
     mock_graph_client.upsert_node.assert_awaited_once()

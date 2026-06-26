@@ -23,6 +23,7 @@ from master.agents.base.agent import AgentSurface
 from master.api.middleware.content_policy import ContentPolicyValidator
 from master.api.middleware.pii_scanner import PIIScanner
 from master.api.schemas import ChatChunk, ChatRequest, ChatResponse, Surface, TokenUsageSchema
+from master.core.config import DEFAULT_USER_ID
 from master.core.exceptions import PIIDetectedError
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
@@ -124,6 +125,9 @@ async def chat(
         start = time.monotonic()
 
         device_id: str | None = getattr(request.state, "device_id", None)
+        # Precedence: authenticated identity (future auth middleware) → client-supplied
+        # → single-operator default. Memory is user-scoped, never device-scoped.
+        user_id = getattr(request.state, "user_id", None) or body.user_id or DEFAULT_USER_ID
         surface = _SURFACE_MAP.get(body.surface, AgentSurface.WEB)
 
         initial_state: OrchestratorState = {
@@ -132,6 +136,7 @@ async def chat(
             "surface": surface,
             "device_id": device_id,
             "session_id": body.session_id,
+            "user_id": user_id,
             "trace_id": trace_id,
             "messages": [{"role": "user", "content": body.message}],
             "retry_count": 0,
@@ -213,6 +218,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                 "raw_input": body.message,
                 "surface": surface,
                 "session_id": body.session_id,
+                "user_id": body.user_id or DEFAULT_USER_ID,
                 "trace_id": trace_id,
                 "messages": [{"role": "user", "content": body.message}],
                 "retry_count": 0,

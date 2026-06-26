@@ -36,6 +36,7 @@ class OrchestratorState(TypedDict, total=False):
     surface: AgentSurface
     device_id: str | None
     session_id: str | None
+    user_id: str | None
     trace_id: str
 
     # ── Intent Classification (set by classify node) ────────────────────────

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from master.agents.base.agent import MemoryDelta
 from master.agents.librarian.mem0_client import Mem0Client
 from master.agents.librarian.zep_client import ZepClient
+from master.core.config import DEFAULT_USER_ID
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
 
@@ -29,8 +30,6 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 tracer = get_tracer(__name__)
-
-_DEFAULT_USER_ID = "lucifer-user"  # single-user; scoped by session in Phase 4+
 
 # Data classifications that are allowed in cloud/external stores
 _CLOUD_SAFE = frozenset({"public", "standard"})
@@ -51,7 +50,7 @@ class MemoryWriter:
         self,
         deltas: list[MemoryDelta],
         agent_id: str = "",
-        user_id: str = _DEFAULT_USER_ID,
+        user_id: str = DEFAULT_USER_ID,
     ) -> None:
         """
         Fan out each delta to the appropriate stores based on its classification.

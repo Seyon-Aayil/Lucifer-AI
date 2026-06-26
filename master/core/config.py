@@ -14,6 +14,10 @@ from functools import lru_cache
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Fallback memory scope when no authenticated user_id is supplied. Single source
+# of truth for the single-operator default; real identity enters via the request.
+DEFAULT_USER_ID = "lucifer-user"
+
 
 class Environment(enum.StrEnum):
     DEVELOPMENT = "development"
