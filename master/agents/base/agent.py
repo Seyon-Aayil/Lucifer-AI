@@ -17,6 +17,7 @@ from typing import Any, ClassVar, Literal
 
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
+from master.llm.interfaces import CompletionRequest, CompletionResponse, LLMProvider
 from master.llm.interfaces import TokenUsage as TokenUsage  # re-export
 
 log = get_logger(__name__)
@@ -198,6 +199,20 @@ class AgentResponse:
 
 
 @dataclass
+class HandlerResult:
+    """
+    Return value of an agent's intent handler. Carries the response text plus
+    any memory deltas and the real LLM token usage / cost (zero for handlers
+    that don't call an LLM, e.g. pure-MCP or static summaries).
+    """
+
+    text: str = ""
+    memory_deltas: list[MemoryDelta] = field(default_factory=list)
+    token_usage: TokenUsage = field(default_factory=lambda: TokenUsage(0, 0))
+    cost_usd: float = 0.0
+
+
+@dataclass
 class AgentStreamChunk:
     """Single streaming chunk from stream_execute()."""
 
@@ -304,4 +319,23 @@ class BaseAgent(ABC):
             agent_id=self.agent_id,
             status="escalate",
             escalation_reason=reason,
+        )
+
+    async def _run_llm(
+        self, provider: LLMProvider, completion_req: CompletionRequest
+    ) -> HandlerResult:
+        """
+        Run a completion via the registry and capture real token usage + cost.
+
+        Single seam for the LLM call path — the future place to thread
+        spend_tracker/agent_id into complete_with_retry for budget enforcement.
+        """
+        response: CompletionResponse = await self._llm.complete_with_retry(provider, completion_req)
+        cost = response.token_usage.cost(
+            provider.cost_per_input_token, provider.cost_per_output_token
+        )
+        return HandlerResult(
+            text=response.content,
+            token_usage=response.token_usage,
+            cost_usd=cost,
         )

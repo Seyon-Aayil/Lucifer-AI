@@ -155,6 +155,11 @@ async def chat(
         agent_id = final_state.get("agent_id", "personal-agent")
         response_text = final_state.get("final_output", "")
 
+        # Real token usage + cost from the agent's LLM call (zero for pure-MCP turns).
+        agent_response = final_state.get("agent_response")
+        usage = agent_response.token_usage if agent_response else None
+        cost_usd = agent_response.cost_usd if agent_response else None
+
         await _check_content_policy(response_text, "output")
 
         # Capture the turn for model-upgrade replay (best-effort, non-blocking).
@@ -180,11 +185,11 @@ async def chat(
             content=response_text,
             surface=body.surface,
             token_usage=TokenUsageSchema(
-                input_tokens=0,
-                output_tokens=0,
-                total_tokens=0,  # filled by agent in Phase 3
+                input_tokens=usage.input_tokens if usage else 0,
+                output_tokens=usage.output_tokens if usage else 0,
+                total_tokens=usage.total_tokens if usage else 0,
             ),
-            cost_usd=None,
+            cost_usd=cost_usd,
             latency_ms=latency_ms,
             created_at=datetime.now(UTC),
         )

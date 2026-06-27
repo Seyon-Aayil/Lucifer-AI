@@ -22,9 +22,9 @@ from master.agents.base.agent import (
     AgentRequest,
     AgentResponse,
     BaseAgent,
+    HandlerResult,
     MemoryDelta,
     RiskTier,
-    TokenUsage,
 )
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
@@ -49,6 +49,14 @@ _WRITE_INTENTS = frozenset({"set_alert", "update_budget", "pay_bill", "transfer"
 _READ_INTENTS = frozenset({"check_budget", "spending_summary", "financial_query"})
 
 
+def _amount(node: dict[str, Any]) -> float:
+    """Best-effort numeric amount for a Financial node (0.0 if missing/invalid)."""
+    try:
+        return float(node.get("amount", 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 class FinancialAgent(BaseAgent):
     """
     Financial assistant. Read queries complete autonomously; any write
@@ -70,7 +78,7 @@ class FinancialAgent(BaseAgent):
                 )
 
             try:
-                response_text, memory_deltas = await self._handle_intent(request)
+                result = await self._handle_intent(request)
             except Exception as exc:
                 return self._error_response(request, str(exc))
 
@@ -81,20 +89,38 @@ class FinancialAgent(BaseAgent):
                 task_id=request.task_id,
                 agent_id=self.AGENT_ID,
                 status="success",
-                result={"content": response_text},
-                memory_deltas=memory_deltas,
-                token_usage=TokenUsage(input_tokens=0, output_tokens=0),
-                cost_usd=0.0,
+                result={"content": result.text},
+                memory_deltas=result.memory_deltas,
+                token_usage=result.token_usage,
+                cost_usd=result.cost_usd,
             )
 
-    async def _handle_intent(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
+    async def _handle_intent(self, request: AgentRequest) -> HandlerResult:
         handlers: dict[str, Any] = {
             "check_budget": self._check_budget,
             "spending_summary": self._spending_summary,
             "financial_query": self._financial_query,
         }
         handler = handlers.get(request.intent, self._financial_query)
-        return await handler(request)  # type: ignore[no-any-return]
+        result = await handler(request)
+        if isinstance(result, HandlerResult):
+            return result
+        text, deltas = result
+        return HandlerResult(text=text, memory_deltas=deltas)
+
+    async def _read_financial_nodes(self) -> list[dict[str, Any]] | None:
+        """Read Financial nodes from Neo4j; None on read failure (vs [] = empty)."""
+        from master.agents.librarian.graph_client import GraphClient
+
+        try:
+            gc = GraphClient.from_settings()
+            try:
+                return await gc.list_nodes_by_type("Financial", limit=500, order_by="updatedAt")
+            finally:
+                await gc.close()
+        except Exception as exc:
+            log.warning("financial_agent.read_failed", error=str(exc))
+            return None
 
     async def _check_budget(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         """
@@ -103,27 +129,11 @@ class FinancialAgent(BaseAgent):
         Reports rounded totals only — never raw account numbers or per-account
         balances (see the agent's RESTRICTED-data rules above).
         """
-        from master.agents.librarian.graph_client import GraphClient
-
-        try:
-            gc = GraphClient.from_settings()
-            try:
-                nodes = await gc.list_nodes_by_type("Financial", limit=500, order_by="updatedAt")
-            finally:
-                await gc.close()
-        except Exception as exc:
-            log.warning("financial_agent.read_failed", error=str(exc))
+        nodes = await self._read_financial_nodes()
+        if nodes is None:
             return "Budget check: financial data is temporarily unavailable.", []
-
         if not nodes:
             return "Budget check: no budget data on file yet.", []
-
-        def _amount(n: dict[str, Any]) -> float:
-            raw = n.get("amount", 0)
-            try:
-                return float(raw)
-            except (TypeError, ValueError):
-                return 0.0
 
         budget = sum(_amount(n) for n in nodes if n.get("kind") == "budget")
         spend = sum(_amount(n) for n in nodes if n.get("kind") in ("spend", "transaction"))
@@ -142,8 +152,28 @@ class FinancialAgent(BaseAgent):
             [],
         )
 
-    async def _spending_summary(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
-        # Phase 3: query local financial DB and summarise via LLM
+    async def _spending_summary(self, request: AgentRequest) -> HandlerResult:
+        """Summarise spending from live Financial nodes (aggregated, no raw values)."""
+        nodes = await self._read_financial_nodes()
+        if not nodes:
+            spend_block = "No transaction data on file."
+        else:
+            spend = sum(_amount(n) for n in nodes if n.get("kind") in ("spend", "transaction"))
+            budget = sum(_amount(n) for n in nodes if n.get("kind") == "budget")
+            txns = [n for n in nodes if n.get("kind") in ("spend", "transaction")]
+            # Aggregate by category only — never expose raw account numbers.
+            by_cat: dict[str, float] = {}
+            for n in txns:
+                by_cat[str(n.get("category", "uncategorised"))] = by_cat.get(
+                    str(n.get("category", "uncategorised")), 0.0
+                ) + _amount(n)
+            cat_lines = "; ".join(f"{c}: ≈{round(v, 2)}" for c, v in sorted(by_cat.items()))
+            spend_block = (
+                f"{len(txns)} transaction(s); total spend ≈ {round(spend, 2)}"
+                f"{f' of {round(budget, 2)} budget' if budget else ''}. "
+                f"By category — {cat_lines or '(none)'}."
+            )
+
         context_summary = request.context_package.summary or ""
         messages = [
             Message(role="system", content=_SYSTEM_PROMPT),
@@ -151,14 +181,14 @@ class FinancialAgent(BaseAgent):
                 role="user",
                 content=(
                     f"Context:\n{context_summary}\n\n"
-                    f"User: {request.raw_input}\n\n"
-                    "Note: Actual transaction data integration is pending Phase 3."
+                    f"Spending data (aggregated):\n{spend_block}\n\n"
+                    f"User: {request.raw_input}"
                 ),
             ),
         ]
         return await self._llm_complete(request, messages)
 
-    async def _financial_query(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
+    async def _financial_query(self, request: AgentRequest) -> HandlerResult:
         context_summary = request.context_package.summary or ""
         messages = [
             Message(role="system", content=_SYSTEM_PROMPT),
@@ -169,9 +199,7 @@ class FinancialAgent(BaseAgent):
         ]
         return await self._llm_complete(request, messages)
 
-    async def _llm_complete(
-        self, request: AgentRequest, messages: list[Message]
-    ) -> tuple[str, list[MemoryDelta]]:
+    async def _llm_complete(self, request: AgentRequest, messages: list[Message]) -> HandlerResult:
         selection = await self._llm.select(
             query=request.raw_input,
             agent_id=self.AGENT_ID,
@@ -184,5 +212,4 @@ class FinancialAgent(BaseAgent):
             max_tokens=request.token_budget.output_limit,
             effort=selection.effort,
         )
-        response = await self._llm.complete_with_retry(provider, completion_req)
-        return response.content, []
+        return await self._run_llm(provider, completion_req)

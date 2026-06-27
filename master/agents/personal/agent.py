@@ -18,9 +18,9 @@ from master.agents.base.agent import (
     AgentRequest,
     AgentResponse,
     BaseAgent,
+    HandlerResult,
     MemoryDelta,
     RiskTier,
-    TokenUsage,
 )
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
@@ -65,7 +65,7 @@ class PersonalAgent(BaseAgent):
                 )
 
             try:
-                response_text, memory_deltas = await self._handle_intent(request)
+                result = await self._handle_intent(request)
             except Exception as exc:
                 return self._error_response(request, str(exc))
 
@@ -81,13 +81,13 @@ class PersonalAgent(BaseAgent):
                 task_id=request.task_id,
                 agent_id=self.AGENT_ID,
                 status="success",
-                result={"content": response_text},
-                memory_deltas=memory_deltas,
-                token_usage=TokenUsage(input_tokens=0, output_tokens=0),  # set by LLM call
-                cost_usd=0.0,
+                result={"content": result.text},
+                memory_deltas=result.memory_deltas,
+                token_usage=result.token_usage,
+                cost_usd=result.cost_usd,
             )
 
-    async def _handle_intent(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
+    async def _handle_intent(self, request: AgentRequest) -> HandlerResult:
         """Dispatch to the appropriate handler based on intent."""
         handlers: dict[str, Any] = {
             "schedule_meeting": self._schedule_meeting,
@@ -96,9 +96,15 @@ class PersonalAgent(BaseAgent):
             "chat": self._chat,
         }
         handler = handlers.get(request.intent, self._chat)
-        return await handler(request)  # type: ignore[no-any-return]
+        result = await handler(request)
+        # LLM handlers return HandlerResult (with token usage); pure-MCP/static
+        # handlers return (text, deltas) — normalise those to a zero-usage result.
+        if isinstance(result, HandlerResult):
+            return result
+        text, deltas = result
+        return HandlerResult(text=text, memory_deltas=deltas)
 
-    async def _chat(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
+    async def _chat(self, request: AgentRequest) -> HandlerResult:
         """General chat: build context-aware prompt, call LLM, return response."""
         context_summary = request.context_package.summary or ""
         messages = [
@@ -121,8 +127,7 @@ class PersonalAgent(BaseAgent):
             max_tokens=request.token_budget.output_limit,
             effort=selection.effort,
         )
-        response = await self._llm.complete_with_retry(provider, completion_req)
-        return response.content, []
+        return await self._run_llm(provider, completion_req)
 
     async def _summarise_calendar(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
         """Read calendar events and produce a structured summary."""

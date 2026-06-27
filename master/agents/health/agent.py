@@ -24,8 +24,8 @@ from master.agents.base.agent import (
     AgentRequest,
     AgentResponse,
     BaseAgent,
+    HandlerResult,
     MemoryDelta,
-    TokenUsage,
 )
 from master.core.config import get_settings
 from master.core.logging import get_logger
@@ -59,7 +59,7 @@ class HealthAgent(BaseAgent):
             start = time.monotonic()
 
             try:
-                response_text, memory_deltas = await self._handle_intent(request)
+                result = await self._handle_intent(request)
             except Exception as exc:
                 return self._error_response(request, str(exc))
 
@@ -70,13 +70,13 @@ class HealthAgent(BaseAgent):
                 task_id=request.task_id,
                 agent_id=self.AGENT_ID,
                 status="success",
-                result={"content": response_text},
-                memory_deltas=memory_deltas,
-                token_usage=TokenUsage(input_tokens=0, output_tokens=0),
-                cost_usd=0.0,
+                result={"content": result.text},
+                memory_deltas=result.memory_deltas,
+                token_usage=result.token_usage,
+                cost_usd=result.cost_usd,
             )
 
-    async def _handle_intent(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
+    async def _handle_intent(self, request: AgentRequest) -> HandlerResult:
         handlers: dict[str, Any] = {
             "health_query": self._health_query,
             "medication_reminder": self._medication_reminder,
@@ -84,7 +84,11 @@ class HealthAgent(BaseAgent):
             "sleep_summary": self._sleep_summary,
         }
         handler = handlers.get(request.intent, self._health_query)
-        return await handler(request)  # type: ignore[no-any-return]
+        result = await handler(request)
+        if isinstance(result, HandlerResult):
+            return result
+        text, deltas = result
+        return HandlerResult(text=text, memory_deltas=deltas)
 
     async def _read_health_records(self, category: str) -> list[dict[str, Any]]:
         """
@@ -140,7 +144,7 @@ class HealthAgent(BaseAgent):
         # Privacy: never name the medications — report the count of scheduled items only.
         return f"Medication reminders: {len(records)} scheduled item(s) on your list.", []
 
-    async def _health_query(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
+    async def _health_query(self, request: AgentRequest) -> HandlerResult:
         context_summary = request.context_package.summary or ""
         messages = [
             Message(role="system", content=_SYSTEM_PROMPT),
@@ -153,7 +157,7 @@ class HealthAgent(BaseAgent):
 
     async def _llm_complete_local(
         self, request: AgentRequest, messages: list[Message]
-    ) -> tuple[str, list[MemoryDelta]]:
+    ) -> HandlerResult:
         """Force local Ollama model — health data must never reach cloud APIs."""
         settings = get_settings()
         selection = await self._llm.select(
@@ -175,5 +179,4 @@ class HealthAgent(BaseAgent):
             max_tokens=request.token_budget.output_limit,
             effort=selection.effort,
         )
-        response = await self._llm.complete_with_retry(provider, completion_req)
-        return response.content, []
+        return await self._run_llm(provider, completion_req)
