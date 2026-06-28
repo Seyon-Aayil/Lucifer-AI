@@ -282,3 +282,24 @@ servers:
             query: { type: string }
             limit: { type: integer, default: 20 }
           additionalProperties: false
+
+  # ── Web Search ───────────────────────────────────────────────────────────────
+  - server_id: web_search
+    display_name: Web Search MCP
+    transport: stdio
+    auth_method: api_key
+    docker_image: lucifer/mcp-web-search:latest
+    env_vars:
+      MCP_API_KEY: ${web_search_api_key}
+    allowed_agents:
+      - research-agent
+    tools:
+      - name: search
+        description: Live web search; returns ranked results with titles, URLs, and snippets.
+        input_schema:
+          type: object
+          required: [query]
+          properties:
+            query: { type: string }
+            max_results: { type: integer, default: 5 }
+          additionalProperties: false
