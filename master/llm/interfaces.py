@@ -78,6 +78,12 @@ class CompletionRequest:
     stream: bool = False
     tools: list[dict[str, Any]] | None = None
     tool_choice: str | dict[str, Any] | None = None
+    # Reasoning depth dial (low | medium | high | xhigh). Mapped from RouteLLM
+    # complexity by the registry; only honoured by effort-capable models.
+    effort: str | None = None
+    # JSON-schema dict to constrain the response (structured outputs). Callers
+    # may pass SomeModel.model_json_schema(). Only honoured by capable models.
+    response_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -92,6 +98,18 @@ class CompletionResponse:
     finish_reason: str  # "stop" | "length" | "tool_calls" | "error"
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     raw_response: Any = None  # Original SDK response (for debugging)
+
+
+@dataclass(frozen=True)
+class ProviderSelection:
+    """
+    Result of ProviderRegistry.select: the chosen provider plus the per-request
+    reasoning effort derived from the RouteLLM complexity score (None when the
+    weak tier is chosen or effort does not apply).
+    """
+
+    provider: LLMProvider
+    effort: str | None = None
 
 
 @dataclass

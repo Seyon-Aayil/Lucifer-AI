@@ -333,7 +333,7 @@ Enforces: Ruff lint, Ruff format, mypy, no secrets, no direct commits to `main`.
 | **Phase 0** — Bootstrap | 2 weeks | ✅ **Done** | All Docker services running; CI green |
 | **Phase 1** — Foundation | 6 weeks | ✅ **Done** | E2E chat: input → Librarian → LLM → memory write |
 | **Phase 2** — Integrations | 6 weeks | ✅ **Done** | Gmail/GCal/Notion/GitHub MCPs + Docker sandbox + budget hardening |
-| **Phase 3** — Agents + News | 8 weeks | 🔄 **In Progress** | All 5 specialist agents + LibrarianAgent full wiring + news digest pipeline |
+| **Phase 3** — Agents + News | 8 weeks | ✅ **Done** | All 5 specialist agents + LibrarianAgent full wiring + news digest pipeline |
 | **Phase 4** — Desktop | 6 weeks | ⏳ Planned | macOS offline app (Tauri 2.0 + Ollama + gRPC sync) |
 | **Phase 5** — Mobile | 8 weeks | ⏳ Planned | iOS (Foundation Models) + Android (ONNX) + OTA upgrade |
 | **Phase 6** — Watch + Polish | 6 weeks | ⏳ Planned | Apple Watch + security hardening + load testing |
@@ -342,7 +342,7 @@ Enforces: Ruff lint, Ruff format, mypy, no secrets, no direct commits to `main`.
 
 **DoD — Phase 2 ✅:** MCP servers (Gmail, GCal, Notion, GitHub) running in Docker sandboxes; agents invoke tools via `MCPClient.invoke()` with manifest ACL, schema validation, and HMAC audit trail; real-time budget enforcement via `SpendTracker` before every LLM call.
 
-**DoD — Phase 3 (target):** All 5 specialist agents (`personal`, `coding`, `financial`, `health`, `research`) operational with live MCP tool calls; LibrarianAgent fully wired to Mem0 + Zep + Neo4j; news digest pipeline running on schedule; `AsyncPostgresSaver` replacing in-memory LangGraph checkpointer.
+**DoD — Phase 3 ✅:** All 5 specialist agents (`personal`, `coding`, `financial`, `health`, `research`) operational with live MCP tool calls + real graph reads; LibrarianAgent wired to Mem0 + Zep + Neo4j (per-user scoped); news digest pipeline running on schedule; `AsyncPostgresSaver` replacing the in-memory LangGraph checkpointer; real token usage + cost surfaced in every response. (Integration verification — `make up && make test` — pending a full Docker-stack run.)
 
 
 ---

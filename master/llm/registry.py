@@ -33,11 +33,21 @@ from master.llm.interfaces import (
     CompletionRequest,
     CompletionResponse,
     LLMProvider,
+    ProviderSelection,
     ProviderTier,
 )
 
 log = get_logger(__name__)
 tracer = get_tracer(__name__)
+
+
+def _is_refusal(response: CompletionResponse) -> bool:
+    """
+    True if the response is a safety refusal. LiteLLM maps Anthropic
+    stop_reason="refusal" (and Google/OpenAI safety blocks) to
+    finish_reason="content_filter".
+    """
+    return response.finish_reason == "content_filter"
 
 
 class ProviderRegistry:
@@ -51,8 +61,9 @@ class ProviderRegistry:
         self,
         providers: list[LLMProvider],
         routellm_threshold: float = 0.5,
-        strong_model_id: str = "anthropic-claude-opus-4",
-        weak_model_id: str = "anthropic-claude-haiku-4",
+        strong_model_id: str = "anthropic-claude-opus-4-8",
+        weak_model_id: str = "anthropic-claude-haiku-4-5",
+        refusal_fallback: bool = True,
     ) -> None:
         self._providers: dict[str, LLMProvider] = {p.provider_id: p for p in providers}
         self._breakers: dict[str, CircuitBreaker] = {
@@ -61,6 +72,7 @@ class ProviderRegistry:
         self._routellm_threshold = routellm_threshold
         self._strong_model_id = strong_model_id
         self._weak_model_id = weak_model_id
+        self._refusal_fallback = refusal_fallback
         # Lazy-loaded RouteLLM controller
         self._routellm: Any | None = None
 
@@ -91,7 +103,7 @@ class ProviderRegistry:
         providers: list[LLMProvider] = []
 
         if settings.anthropic_api_key:
-            for model in ("claude-opus-4", "claude-sonnet-4-5", "claude-haiku-4"):
+            for model in ("claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"):
                 providers.append(
                     AnthropicProvider(
                         model=model,
@@ -116,7 +128,7 @@ class ProviderRegistry:
                 )
 
         if settings.google_api_key:
-            for model in ("gemini-1.5-pro", "gemini-1.5-flash"):
+            for model in ("gemini-2.5-pro", "gemini-2.0-flash"):
                 providers.append(
                     GoogleProvider(
                         model=model,
@@ -141,6 +153,7 @@ class ProviderRegistry:
             routellm_threshold=settings.routellm_threshold,
             strong_model_id=f"anthropic-{settings.routellm_strong_model.split('/')[-1]}",
             weak_model_id=f"anthropic-{settings.routellm_weak_model.split('/')[-1]}",
+            refusal_fallback=settings.refusal_fallback_enabled,
         )
 
     async def _routellm_score(self, query: str) -> float:
@@ -167,6 +180,22 @@ class ProviderRegistry:
             log.warning("routellm.score.failed", error=str(exc))
             return 0.5  # Default to ambiguous
 
+    def complexity_to_effort(self, score: float) -> str | None:
+        """
+        Map a RouteLLM complexity score (0.0–1.0) to a reasoning-effort level.
+
+        Returns None below the routing threshold (the weak tier is chosen and
+        does not support the effort dial). Above the threshold, sub-buckets the
+        strong tier so cheap-but-complex queries don't pay full effort.
+        """
+        if score < self._routellm_threshold:
+            return None
+        if score < 0.7:
+            return "medium"
+        if score < 0.85:
+            return "high"
+        return "xhigh"
+
     async def select(
         self,
         query: str,
@@ -174,26 +203,29 @@ class ProviderRegistry:
         required_capabilities: set[Capability] | None = None,
         agent_id: str = "unknown",
         max_budget_usd: float = 1.0,
-    ) -> LLMProvider:
+    ) -> ProviderSelection:
         """
         Select the most appropriate provider for a request.
-        1. RouteLLM scores complexity → selects preferred model.
+        1. RouteLLM scores complexity → selects preferred model + effort level.
         2. Filters candidates by tier + capabilities + circuit state + budget.
         3. Falls back through chain if preferred is unavailable.
+        Returns the provider plus the reasoning effort derived from the score.
         Raises: NoSuitableProviderError if no provider can serve the request.
         """
         with tracer.start_as_current_span("llm.registry.select"):
             caps = required_capabilities or {Capability.TEXT}
 
-            # RouteLLM: pick preferred provider ID
+            # RouteLLM: pick preferred provider ID + effort level
             score = await self._routellm_score(query)
             preferred_id = (
                 self._strong_model_id if score >= self._routellm_threshold else self._weak_model_id
             )
+            effort = self.complexity_to_effort(score)
             log.debug(
                 "routellm.route",
                 score=round(score, 3),
                 preferred=preferred_id,
+                effort=effort,
                 agent=agent_id,
             )
 
@@ -205,7 +237,7 @@ class ProviderRegistry:
                 if not await breaker.can_proceed():
                     log.debug("llm.provider.circuit_open", provider=provider.provider_id)
                     continue
-                return provider
+                return ProviderSelection(provider=provider, effort=effort)
 
             raise NoSuitableProviderError(
                 f"No healthy provider for tier={tier}, caps={caps}, agent={agent_id}"
@@ -244,6 +276,36 @@ class ProviderRegistry:
         if provider_id in self._breakers:
             await self._breakers[provider_id].record_success()
 
+    async def _record_spend(
+        self,
+        spend_tracker: Any | None,
+        agent_id: str | None,
+        provider: LLMProvider,
+        response: CompletionResponse,
+    ) -> None:
+        """Record actual spend for a completed call, if a tracker is wired."""
+        if spend_tracker and agent_id:
+            cost = (
+                response.token_usage.input_tokens * provider.cost_per_input_token
+                + response.token_usage.output_tokens * provider.cost_per_output_token
+            )
+            await spend_tracker.record_spend(agent_id, cost)
+
+    def _should_refusal_fallback(self, provider: LLMProvider, response: CompletionResponse) -> bool:
+        """
+        Whether a safety refusal should be re-served on the strong model.
+
+        Gated to MASTER (cloud) providers so local-only calls (e.g. the health
+        agent's Ollama path) are never re-routed to a cloud model. No fallback
+        when the strong model itself refused (terminal).
+        """
+        return (
+            self._refusal_fallback
+            and _is_refusal(response)
+            and provider.tier == ProviderTier.MASTER
+            and provider.provider_id != self._strong_model_id
+        )
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
     async def complete_with_retry(
         self,
@@ -265,14 +327,24 @@ class ProviderRegistry:
         try:
             response = await provider.complete(request)
             await self.report_success(provider.provider_id)
+            await self._record_spend(spend_tracker, agent_id, provider, response)
 
-            # ── Record actual spend ────────────────────────────────────────────
-            if spend_tracker and agent_id:
-                actual_cost = (
-                    response.token_usage.input_tokens * provider.cost_per_input_token
-                    + response.token_usage.output_tokens * provider.cost_per_output_token
-                )
-                await spend_tracker.record_spend(agent_id, actual_cost)
+            # ── Refusal fallback ────────────────────────────────────────────────
+            # A safety refusal is a successful 200 (not an exception), so it is
+            # handled here, after the call. Re-serve once on the strong model.
+            if self._should_refusal_fallback(provider, response):
+                fb = self._providers.get(self._strong_model_id)
+                if fb is not None and await self._breakers[fb.provider_id].can_proceed():
+                    log.info(
+                        "llm.refusal_fallback",
+                        from_provider=provider.provider_id,
+                        to_provider=fb.provider_id,
+                        agent=agent_id,
+                    )
+                    fb_response = await fb.complete(request)
+                    await self.report_success(fb.provider_id)
+                    await self._record_spend(spend_tracker, agent_id, fb, fb_response)
+                    return fb_response
 
             return response
         except Exception as exc:

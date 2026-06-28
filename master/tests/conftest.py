@@ -57,7 +57,7 @@ def mock_llm_registry():
     """Mock ProviderRegistry that returns a fake provider."""
     registry = AsyncMock()
     provider = AsyncMock()
-    from master.llm.interfaces import CompletionResponse, TokenUsage
+    from master.llm.interfaces import CompletionResponse, ProviderSelection, TokenUsage
 
     provider.provider_id = "test-provider"
     provider.complete.return_value = CompletionResponse(
@@ -67,7 +67,7 @@ def mock_llm_registry():
         token_usage=TokenUsage(input_tokens=100, output_tokens=50),
         finish_reason="stop",
     )
-    registry.select.return_value = provider
+    registry.select.return_value = ProviderSelection(provider=provider, effort=None)
     registry.complete_with_retry.return_value = provider.complete.return_value
     return registry
 

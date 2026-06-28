@@ -14,6 +14,10 @@ from functools import lru_cache
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Fallback memory scope when no authenticated user_id is supplied. Single source
+# of truth for the single-operator default; real identity enters via the request.
+DEFAULT_USER_ID = "lucifer-user"
+
 
 class Environment(enum.StrEnum):
     DEVELOPMENT = "development"
@@ -81,8 +85,11 @@ class Settings(BaseSettings):
 
     # ── RouteLLM ───────────────────────────────────────────────────────────
     routellm_threshold: float = Field(0.5, ge=0.0, le=1.0)
-    routellm_strong_model: str = "anthropic/claude-opus-4"
-    routellm_weak_model: str = "anthropic/claude-haiku-4"
+    routellm_strong_model: str = "anthropic/claude-opus-4-8"
+    routellm_weak_model: str = "anthropic/claude-haiku-4-5"
+    # When a cloud (MASTER-tier) provider refuses a benign request on safety
+    # grounds, transparently re-serve it once on the strong model.
+    refusal_fallback_enabled: bool = True
 
     # ── LLM Providers ──────────────────────────────────────────────────────
     anthropic_api_key: str | None = None
@@ -153,7 +160,7 @@ class Settings(BaseSettings):
     model_upgrade_candidates: list[str] = Field(default_factory=list)
     # Use an LLM-as-judge scorer instead of exact-substring golden matching.
     model_upgrade_use_judge: bool = False
-    model_upgrade_judge_model: str = "anthropic/claude-haiku-4"
+    model_upgrade_judge_model: str = "anthropic/claude-haiku-4-5"
     # Replay real captured traffic (query_log) instead of the golden set.
     model_upgrade_use_replay: bool = False
 

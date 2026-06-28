@@ -1,9 +1,13 @@
 """
 master.llm.providers.anthropic
 ================================
-Anthropic Claude adapter (claude-opus-4, claude-sonnet-4-5, claude-haiku-4).
+Anthropic Claude adapter (claude-opus-4-8, claude-sonnet-4-6, claude-haiku-4-5).
 Routes through LiteLLM proxy so budget caps and fallback chains are enforced.
 Never instantiate the Anthropic SDK directly — always go via litellm client.
+
+Note: current Opus models (4.8 / 4.7) reject the sampling parameters
+(temperature / top_p / top_k) with HTTP 400 — they are omitted for those
+models (see _omit_sampling_params).
 """
 
 from __future__ import annotations
@@ -30,13 +34,54 @@ from master.llm.interfaces import (
 log = get_logger(__name__)
 tracer = get_tracer(__name__)
 
-# Map of supported Anthropic models with cost per million tokens (USD)
+# Map of supported Anthropic models with cost per million tokens (USD).
+# Prices are per the current model catalogue (USD per million tokens):
+#   Opus 4.8 = $5 / $25, Sonnet 4.6 = $3 / $15, Haiku 4.5 = $1 / $5.
 _MODEL_COSTS: dict[str, tuple[float, float]] = {
     # model_id: (input_cost_per_token, output_cost_per_token)
-    "claude-opus-4": (15.0 / 1_000_000, 75.0 / 1_000_000),
-    "claude-sonnet-4-5": (3.0 / 1_000_000, 15.0 / 1_000_000),
-    "claude-haiku-4": (0.25 / 1_000_000, 1.25 / 1_000_000),
+    "claude-opus-4-8": (5.0 / 1_000_000, 25.0 / 1_000_000),
+    "claude-sonnet-4-6": (3.0 / 1_000_000, 15.0 / 1_000_000),
+    "claude-haiku-4-5": (1.0 / 1_000_000, 5.0 / 1_000_000),
 }
+
+# Models that reject sampling parameters (temperature / top_p / top_k) with
+# HTTP 400. Matched as substrings against the model id.
+_NO_SAMPLING_PARAM_MARKERS: tuple[str, ...] = ("opus-4-8", "opus-4-7", "fable")
+
+# Models that support the reasoning-effort dial + adaptive thinking. Effort
+# errors on Sonnet 4.5 / Haiku 4.5 and earlier, so this set is narrower.
+_EFFORT_MARKERS: tuple[str, ...] = (
+    "opus-4-5",
+    "opus-4-6",
+    "opus-4-7",
+    "opus-4-8",
+    "sonnet-4-6",
+    "fable",
+)
+
+# Models that support structured outputs (output_config.format / response_format).
+# Note Haiku 4.5 supports this but NOT effort — hence a separate gate.
+_STRUCTURED_OUTPUT_MARKERS: tuple[str, ...] = (
+    "opus-4",
+    "sonnet-4-6",
+    "haiku-4-5",
+    "fable",
+)
+
+
+def _omit_sampling_params(model: str) -> bool:
+    """Return True if sampling params must be omitted for this model (else 400)."""
+    return any(marker in model for marker in _NO_SAMPLING_PARAM_MARKERS)
+
+
+def _supports_effort(model: str) -> bool:
+    """Return True if the model accepts output_config.effort + adaptive thinking."""
+    return any(marker in model for marker in _EFFORT_MARKERS)
+
+
+def _supports_structured_outputs(model: str) -> bool:
+    """Return True if the model accepts schema-constrained JSON output."""
+    return any(marker in model for marker in _STRUCTURED_OUTPUT_MARKERS)
 
 
 class AnthropicProvider(LLMProvider):
@@ -93,6 +138,27 @@ class AnthropicProvider(LLMProvider):
     def max_context_tokens(self) -> int:
         return self._max_context
 
+    def _reasoning_kwargs(self, request: CompletionRequest) -> dict[str, Any]:
+        """
+        Build the model-gated request-shaping kwargs (effort + adaptive thinking,
+        structured outputs). Each is included only when the model supports it,
+        so unsupported models never 400.
+        """
+        extra: dict[str, Any] = {}
+        if request.effort and _supports_effort(self._model):
+            extra["output_config"] = {"effort": request.effort}
+            extra["thinking"] = {"type": "adaptive"}
+        if request.response_schema and _supports_structured_outputs(self._model):
+            extra["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_output",
+                    "schema": request.response_schema,
+                    "strict": True,
+                },
+            }
+        return extra
+
     def _build_litellm_messages(self, request: CompletionRequest) -> list[dict[str, Any]]:
         messages = []
         for msg in request.messages:
@@ -113,16 +179,20 @@ class AnthropicProvider(LLMProvider):
         with tracer.start_as_current_span(f"llm.complete.{self.provider_id}"):
             messages = self._build_litellm_messages(request)
             start = time.monotonic()
-            resp = await litellm.acompletion(
-                model=f"anthropic/{self._model}",
-                messages=messages,
-                max_tokens=request.max_tokens,
-                temperature=request.temperature,
-                tools=request.tools,
-                tool_choice=request.tool_choice,
-                api_base=self._proxy_url,
-                api_key=self._api_key,
-            )
+            kwargs: dict[str, Any] = {
+                "model": f"anthropic/{self._model}",
+                "messages": messages,
+                "max_tokens": request.max_tokens,
+                "tools": request.tools,
+                "tool_choice": request.tool_choice,
+                "api_base": self._proxy_url,
+                "api_key": self._api_key,
+            }
+            # Current Opus models (4.8/4.7) 400 on sampling params — omit them.
+            if not _omit_sampling_params(self._model):
+                kwargs["temperature"] = request.temperature
+            kwargs.update(self._reasoning_kwargs(request))
+            resp = await litellm.acompletion(**kwargs)
             latency_ms = int((time.monotonic() - start) * 1000)
 
             usage = resp.usage
@@ -161,15 +231,19 @@ class AnthropicProvider(LLMProvider):
 
     async def stream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
         messages = self._build_litellm_messages(request)
-        async for chunk in await litellm.acompletion(
-            model=f"anthropic/{self._model}",
-            messages=messages,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-            stream=True,
-            api_base=self._proxy_url,
-            api_key=self._api_key,
-        ):
+        kwargs: dict[str, Any] = {
+            "model": f"anthropic/{self._model}",
+            "messages": messages,
+            "max_tokens": request.max_tokens,
+            "stream": True,
+            "api_base": self._proxy_url,
+            "api_key": self._api_key,
+        }
+        # Current Opus models (4.8/4.7) 400 on sampling params — omit them.
+        if not _omit_sampling_params(self._model):
+            kwargs["temperature"] = request.temperature
+        kwargs.update(self._reasoning_kwargs(request))
+        async for chunk in await litellm.acompletion(**kwargs):
             delta = chunk.choices[0].delta.content or ""
             finish = chunk.choices[0].finish_reason
             is_final = finish is not None

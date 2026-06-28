@@ -17,8 +17,7 @@ from master.agents.base.agent import (
     AgentRequest,
     AgentResponse,
     BaseAgent,
-    MemoryDelta,
-    TokenUsage,
+    HandlerResult,
 )
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
@@ -55,7 +54,7 @@ class CodingAgent(BaseAgent):
             start = time.monotonic()
 
             try:
-                response_text, memory_deltas = await self._handle_intent(request)
+                result = await self._handle_intent(request)
             except Exception as exc:
                 return self._error_response(request, str(exc))
 
@@ -66,13 +65,13 @@ class CodingAgent(BaseAgent):
                 task_id=request.task_id,
                 agent_id=self.AGENT_ID,
                 status="success",
-                result={"content": response_text},
-                memory_deltas=memory_deltas,
-                token_usage=TokenUsage(input_tokens=0, output_tokens=0),
-                cost_usd=0.0,
+                result={"content": result.text},
+                memory_deltas=result.memory_deltas,
+                token_usage=result.token_usage,
+                cost_usd=result.cost_usd,
             )
 
-    async def _handle_intent(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
+    async def _handle_intent(self, request: AgentRequest) -> HandlerResult:
         handlers: dict[str, Any] = {
             "review_pr": self._review_pr,
             "analyse_pr": self._review_pr,
@@ -83,12 +82,12 @@ class CodingAgent(BaseAgent):
         handler = handlers.get(request.intent, self._code_assist)
         return await handler(request)  # type: ignore[no-any-return]
 
-    async def _review_pr(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
+    async def _review_pr(self, request: AgentRequest) -> HandlerResult:
         if self._mcp is None:
-            return "PR review: (MCP client not available)", []
+            return HandlerResult(text="PR review: (MCP client not available)")
         result = await self._mcp.invoke("github", "read_pr", {"query": request.raw_input})
         if not result.success:
-            return f"Failed to fetch PR: {result.error}", []
+            return HandlerResult(text=f"Failed to fetch PR: {result.error}")
         pr_data: dict[str, Any] = result.output or {}
         context_summary = request.context_package.summary or ""
         messages = [
@@ -104,24 +103,24 @@ class CodingAgent(BaseAgent):
         ]
         return await self._llm_complete(request, messages)
 
-    async def _create_issue(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
+    async def _create_issue(self, request: AgentRequest) -> HandlerResult:
         if self._mcp is None:
-            return "Issue creation: (MCP client not available)", []
+            return HandlerResult(text="Issue creation: (MCP client not available)")
         result = await self._mcp.invoke(
             "github", "create_issue", {"title": request.raw_input, "body": ""}
         )
         if not result.success:
-            return f"Failed to create issue: {result.error}", []
+            return HandlerResult(text=f"Failed to create issue: {result.error}")
         issue: dict[str, Any] = result.output or {}
         url = issue.get("html_url", "(no URL returned)")
-        return f"Issue created: {url}", []
+        return HandlerResult(text=f"Issue created: {url}")
 
-    async def _repo_summary(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
+    async def _repo_summary(self, request: AgentRequest) -> HandlerResult:
         if self._mcp is None:
-            return "Repo summary: (MCP client not available)", []
+            return HandlerResult(text="Repo summary: (MCP client not available)")
         result = await self._mcp.invoke("github", "get_repo_summary", {"query": request.raw_input})
         if not result.success:
-            return f"Failed to fetch repo summary: {result.error}", []
+            return HandlerResult(text=f"Failed to fetch repo summary: {result.error}")
         repo_data: dict[str, Any] = result.output or {}
         messages = [
             Message(role="system", content=_SYSTEM_PROMPT),
@@ -132,7 +131,7 @@ class CodingAgent(BaseAgent):
         ]
         return await self._llm_complete(request, messages)
 
-    async def _code_assist(self, request: AgentRequest) -> tuple[str, list[MemoryDelta]]:
+    async def _code_assist(self, request: AgentRequest) -> HandlerResult:
         context_summary = request.context_package.summary or ""
         messages = [
             Message(role="system", content=_SYSTEM_PROMPT),
@@ -143,19 +142,17 @@ class CodingAgent(BaseAgent):
         ]
         return await self._llm_complete(request, messages)
 
-    async def _llm_complete(
-        self, request: AgentRequest, messages: list[Message]
-    ) -> tuple[str, list[MemoryDelta]]:
-        provider = await self._llm.select(
+    async def _llm_complete(self, request: AgentRequest, messages: list[Message]) -> HandlerResult:
+        selection = await self._llm.select(
             query=request.raw_input,
             agent_id=self.AGENT_ID,
             max_budget_usd=request.token_budget.max_cost_usd,
         )
+        provider = selection.provider
         completion_req = CompletionRequest(
             messages=messages,
             model=provider.provider_id.split("-", 1)[-1],
             max_tokens=request.token_budget.output_limit,
-            temperature=0.3,
+            effort=selection.effort,
         )
-        response = await self._llm.complete_with_retry(provider, completion_req)
-        return response.content, []
+        return await self._run_llm(provider, completion_req)

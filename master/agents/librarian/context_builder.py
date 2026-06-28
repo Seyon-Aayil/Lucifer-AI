@@ -24,6 +24,7 @@ from master.agents.base.agent import ContextPackage
 from master.agents.librarian.access_control import filter_nodes_for_agent
 from master.agents.librarian.mem0_client import Mem0Client
 from master.agents.librarian.zep_client import ZepClient
+from master.core.config import DEFAULT_USER_ID
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
 
@@ -35,7 +36,6 @@ tracer = get_tracer(__name__)
 
 # Token budget for the summary string (conservative estimate: 1 token ≈ 4 chars)
 _SUMMARY_CHAR_BUDGET = 800
-_DEFAULT_USER_ID = "lucifer-user"  # single-user; replaced by session user_id in Phase 4+
 
 
 class ContextBuilder:
@@ -49,10 +49,13 @@ class ContextBuilder:
         self._mem0 = Mem0Client()
         self._zep = ZepClient()
 
-    async def build(self, agent_id: str, intent: str) -> ContextPackage:
+    async def build(
+        self, agent_id: str, intent: str, user_id: str = DEFAULT_USER_ID
+    ) -> ContextPackage:
         """
         Build an ACL-filtered ContextPackage for the requesting agent.
         Queries all three memory stores in parallel; failures return empty results.
+        Episodic (Mem0) and temporal (Zep) stores are scoped to ``user_id``.
         """
         with tracer.start_as_current_span("context_builder.build"):
             query = intent  # intent string used as the search query seed
@@ -60,8 +63,8 @@ class ContextBuilder:
             # Fan out to all stores concurrently
             neo4j_nodes, mem0_memories, zep_facts = await asyncio.gather(
                 self._fetch_neo4j(agent_id, query),
-                self._fetch_mem0(query),
-                self._fetch_zep(query),
+                self._fetch_mem0(user_id, query),
+                self._fetch_zep(user_id, query),
                 return_exceptions=False,
             )
 
@@ -113,11 +116,11 @@ class ContextBuilder:
             log.warning("context_builder.neo4j_failed", error=str(exc))
             return []
 
-    async def _fetch_mem0(self, query: str) -> list[dict[str, Any]]:
-        return await self._mem0.search(user_id=_DEFAULT_USER_ID, query=query, limit=10)
+    async def _fetch_mem0(self, user_id: str, query: str) -> list[dict[str, Any]]:
+        return await self._mem0.search(user_id=user_id, query=query, limit=10)
 
-    async def _fetch_zep(self, query: str) -> list[dict[str, Any]]:
-        return await self._zep.search(user_id=_DEFAULT_USER_ID, query=query, limit=10)
+    async def _fetch_zep(self, user_id: str, query: str) -> list[dict[str, Any]]:
+        return await self._zep.search(user_id=user_id, query=query, limit=10)
 
 
 # ── Summary builder ───────────────────────────────────────────────────────────

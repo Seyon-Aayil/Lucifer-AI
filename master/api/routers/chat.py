@@ -23,6 +23,7 @@ from master.agents.base.agent import AgentSurface
 from master.api.middleware.content_policy import ContentPolicyValidator
 from master.api.middleware.pii_scanner import PIIScanner
 from master.api.schemas import ChatChunk, ChatRequest, ChatResponse, Surface, TokenUsageSchema
+from master.core.config import DEFAULT_USER_ID
 from master.core.exceptions import PIIDetectedError
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
@@ -124,6 +125,9 @@ async def chat(
         start = time.monotonic()
 
         device_id: str | None = getattr(request.state, "device_id", None)
+        # Precedence: authenticated identity (future auth middleware) → client-supplied
+        # → single-operator default. Memory is user-scoped, never device-scoped.
+        user_id = getattr(request.state, "user_id", None) or body.user_id or DEFAULT_USER_ID
         surface = _SURFACE_MAP.get(body.surface, AgentSurface.WEB)
 
         initial_state: OrchestratorState = {
@@ -132,6 +136,7 @@ async def chat(
             "surface": surface,
             "device_id": device_id,
             "session_id": body.session_id,
+            "user_id": user_id,
             "trace_id": trace_id,
             "messages": [{"role": "user", "content": body.message}],
             "retry_count": 0,
@@ -149,6 +154,11 @@ async def chat(
         latency_ms = int((time.monotonic() - start) * 1000)
         agent_id = final_state.get("agent_id", "personal-agent")
         response_text = final_state.get("final_output", "")
+
+        # Real token usage + cost from the agent's LLM call (zero for pure-MCP turns).
+        agent_response = final_state.get("agent_response")
+        usage = agent_response.token_usage if agent_response else None
+        cost_usd = agent_response.cost_usd if agent_response else None
 
         await _check_content_policy(response_text, "output")
 
@@ -175,11 +185,11 @@ async def chat(
             content=response_text,
             surface=body.surface,
             token_usage=TokenUsageSchema(
-                input_tokens=0,
-                output_tokens=0,
-                total_tokens=0,  # filled by agent in Phase 3
+                input_tokens=usage.input_tokens if usage else 0,
+                output_tokens=usage.output_tokens if usage else 0,
+                total_tokens=usage.total_tokens if usage else 0,
             ),
-            cost_usd=None,
+            cost_usd=cost_usd,
             latency_ms=latency_ms,
             created_at=datetime.now(UTC),
         )
@@ -213,6 +223,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                 "raw_input": body.message,
                 "surface": surface,
                 "session_id": body.session_id,
+                "user_id": body.user_id or DEFAULT_USER_ID,
                 "trace_id": trace_id,
                 "messages": [{"role": "user", "content": body.message}],
                 "retry_count": 0,

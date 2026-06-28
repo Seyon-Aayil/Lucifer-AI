@@ -77,11 +77,13 @@ async def context_inject_node(state: OrchestratorState) -> dict[str, Any]:
         from master.agents.base.agent import ContextPackage
         from master.agents.librarian.context_builder import ContextBuilder
         from master.agents.librarian.graph_client import GraphClient
+        from master.core.config import DEFAULT_USER_ID
 
+        user_id = state.get("user_id") or DEFAULT_USER_ID
         context = ContextPackage(requesting_agent=agent_id, task_type=intent)
         try:
             gc = GraphClient.from_settings()
-            context = await ContextBuilder(gc).build(agent_id, intent)
+            context = await ContextBuilder(gc).build(agent_id, intent, user_id=user_id)
             await gc.close()
         except Exception as exc:
             log.warning("orchestrator.context_inject.fallback", error=str(exc))
@@ -118,6 +120,7 @@ async def route_node(state: OrchestratorState) -> dict[str, Any]:
             surface=state.get("surface", AgentSurface.WEB),
             trace_id=state.get("trace_id", str(uuid.uuid4())),
             raw_input=state.get("raw_input", ""),
+            user_id=state.get("user_id"),
         )
         return {"agent_request": request}
 
@@ -229,6 +232,7 @@ async def memory_write_node(state: OrchestratorState) -> dict[str, Any]:
 
         from master.agents.librarian.graph_client import GraphClient
         from master.agents.librarian.memory_writer import MemoryWriter
+        from master.core.config import DEFAULT_USER_ID
 
         log.info("orchestrator.memory_write", delta_count=len(deltas))
         try:
@@ -237,6 +241,7 @@ async def memory_write_node(state: OrchestratorState) -> dict[str, Any]:
             await writer.apply_deltas(
                 deltas,
                 agent_id=state.get("agent_id", ""),
+                user_id=state.get("user_id") or DEFAULT_USER_ID,
             )
             await gc.close()
         except Exception as exc:
@@ -369,6 +374,7 @@ async def _ollama_intent_classifier(raw_input: str) -> tuple[str, str, RiskTier]
     Falls back to rule-based classifier on any error or timeout.
     """
     from master.core.config import get_settings
+    from master.orchestrator.schemas import IntentClassification
 
     settings = get_settings()
     prompt = _INTENT_CLASSIFIER_PROMPT.format(raw_input=raw_input)
@@ -376,16 +382,18 @@ async def _ollama_intent_classifier(raw_input: str) -> tuple[str, str, RiskTier]
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.post(
                 f"{settings.ollama_base_url}/api/generate",
-                json={"model": "mistral", "prompt": prompt, "stream": False, "format": "json"},
+                json={
+                    "model": "mistral",
+                    "prompt": prompt,
+                    "stream": False,
+                    # Constrain the local model to the classification schema.
+                    "format": IntentClassification.model_json_schema(),
+                },
             )
             resp.raise_for_status()
             result: dict[str, Any] = json.loads(resp.json().get("response", "{}"))
-            intent = result.get("intent", "chat")
-            agent_id = result.get("agent_id", "personal-agent")
-            risk_str = result.get("risk_tier", "low")
-            valid_risk = {t.value for t in RiskTier}
-            risk_tier = RiskTier(risk_str) if risk_str in valid_risk else RiskTier.LOW
-            return intent, agent_id, risk_tier
+            parsed = IntentClassification.model_validate(result)
+            return parsed.intent, parsed.agent_id, parsed.risk_tier
     except Exception as exc:
         log.debug("orchestrator.classify.ollama_fallback", error=str(exc))
         return _simple_intent_classifier(raw_input)

@@ -32,8 +32,8 @@ tracer = get_tracer(__name__)
 # Map of supported Google models with cost per million tokens (USD)
 _MODEL_COSTS: dict[str, tuple[float, float]] = {
     # model_id: (input_cost_per_token, output_cost_per_token)
-    "gemini-1.5-pro": (3.5 / 1_000_000, 10.5 / 1_000_000),
-    "gemini-1.5-flash": (0.075 / 1_000_000, 0.300 / 1_000_000),
+    "gemini-2.5-pro": (1.25 / 1_000_000, 10.0 / 1_000_000),
+    "gemini-2.0-flash": (0.10 / 1_000_000, 0.40 / 1_000_000),
 }
 
 

@@ -98,3 +98,41 @@ async def test_vector_search_invalid_types(mock_driver):
         await client.vector_search([0.1] * 1536, node_types=[NodeType.PERSON.value, "InvalidType"])
 
     session.run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_nodes_by_type_valid(mock_driver):
+    driver, session = mock_driver
+    client = GraphClient(driver)
+    session.run.return_value.data.return_value = [{"n": {"id": "1", "title": "t"}}]
+
+    nodes = await client.list_nodes_by_type(NodeType.NEWS.value, limit=3, order_by="decayScore")
+
+    session.run.assert_called_once()
+    query = session.run.call_args[0][0]
+    assert f"MATCH (n:{NodeType.NEWS.value})" in query
+    assert "ORDER BY n.decayScore DESC" in query
+    assert nodes == [{"id": "1", "title": "t"}]
+
+
+@pytest.mark.asyncio
+async def test_list_nodes_by_type_invalid_label(mock_driver):
+    driver, session = mock_driver
+    client = GraphClient(driver)
+
+    with pytest.raises(ValueError, match="Unauthorized graph identifier"):
+        await client.list_nodes_by_type("InvalidType")
+
+    session.run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_nodes_by_type_invalid_order_by(mock_driver):
+    driver, session = mock_driver
+    client = GraphClient(driver)
+
+    # An injection attempt via order_by must be rejected before any query runs.
+    with pytest.raises(ValueError, match="Unauthorized order_by property"):
+        await client.list_nodes_by_type(NodeType.NEWS.value, order_by="x DETACH DELETE n")
+
+    session.run.assert_not_called()

@@ -102,6 +102,7 @@ class ChatRequest(StrictModel):
     surface: Surface = Surface.WEB
     session_id: str | None = None
     device_id: str | None = None
+    user_id: str | None = None
     stream: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
