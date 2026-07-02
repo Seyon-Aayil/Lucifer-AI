@@ -1,9 +1,9 @@
 """
 master.agents.research.agent
 ==============================
-ResearchAgent: web search, Notion knowledge base queries, and summarisation.
+ResearchAgent: live web search, Notion knowledge base queries, and summarisation.
 
-Tools: Notion MCP, GitHub MCP (repo/PR context).
+Tools: Web Search MCP, Notion MCP, GitHub MCP (repo/PR context).
 Intents: research, search_notion, repo_summary, summarise, web_search.
 Risk: LOW for all intents (read-only).
 """
@@ -27,12 +27,12 @@ log = get_logger(__name__)
 tracer = get_tracer(__name__)
 
 _SYSTEM_PROMPT = """You are Lucifer's research assistant agent.
-You retrieve and synthesise information from Notion and GitHub.
+You retrieve and synthesise information from live web search, Notion, and GitHub.
 Rules:
-- Cite sources when you have them (page title, URL, or PR number).
+- Cite sources when you have them (web page title + URL, Notion page title, or PR number).
 - Summarise clearly; avoid padding.
-- If asked for web search results, note that live internet search is not yet available
-  and offer to search Notion or GitHub instead.
+- Prefer the provided web search results for current/factual questions; say so if no
+  results were available rather than inventing sources.
 - Classify any retrieved content before including it: Restricted/Secret content
   must not be quoted even if retrieved from Notion.
 """
@@ -74,7 +74,7 @@ class ResearchAgent(BaseAgent):
             "search_notion": self._search_notion,
             "repo_summary": self._repo_summary,
             "summarise": self._summarise,
-            "web_search": self._web_search_fallback,
+            "web_search": self._web_search,
         }
         handler = handlers.get(request.intent, self._research)
         return await handler(request)  # type: ignore[no-any-return]
@@ -121,8 +121,34 @@ class ResearchAgent(BaseAgent):
             return await self._llm_complete(request, messages)
         return await self._llm_chat(request)
 
+    async def _web_search_results(self, request: AgentRequest) -> str:
+        """
+        Run a live web search via the web_search MCP server and return a
+        formatted result block. Returns "" when unavailable (no MCP client,
+        tool failure, or no hits) — never raises.
+        """
+        if self._mcp is None:
+            return ""
+        try:
+            result = await self._mcp.invoke(
+                "web_search", "search", {"query": request.raw_input, "max_results": 5}
+            )
+        except Exception as exc:
+            log.warning("research_agent.web_search_failed", error=str(exc))
+            return ""
+        if not result.success or not result.output:
+            return ""
+        hits: list[dict[str, Any]] = result.output if isinstance(result.output, list) else []
+        lines = [
+            f"- {h.get('title', '(untitled)')} ({h.get('url', '')}): {h.get('snippet', '')}"
+            for h in hits[:5]
+        ]
+        return "\n".join(lines)
+
     async def _research(self, request: AgentRequest) -> HandlerResult:
-        """General research: try Notion search, then LLM with context."""
+        """General research: live web search + Notion search, then synthesise via LLM."""
+        web_context = await self._web_search_results(request)
+
         notion_context = ""
         if self._mcp is not None:
             result = await self._mcp.invoke("notion", "search_pages", {"query": request.raw_input})
@@ -139,6 +165,7 @@ class ResearchAgent(BaseAgent):
                 role="user",
                 content=(
                     f"Context:\n{context_summary}\n\n"
+                    + (f"Web search results:\n{web_context}\n\n" if web_context else "")
                     + (f"Notion pages found:\n{notion_context}\n\n" if notion_context else "")
                     + f"Research request: {request.raw_input}"
                 ),
@@ -146,10 +173,26 @@ class ResearchAgent(BaseAgent):
         ]
         return await self._llm_complete(request, messages)
 
-    async def _web_search_fallback(self, request: AgentRequest) -> HandlerResult:
-        """Live web search not available yet; fall back to Notion + LLM."""
-        log.info("research_agent.web_search_fallback", agent=self.AGENT_ID)
-        return await self._research(request)
+    async def _web_search(self, request: AgentRequest) -> HandlerResult:
+        """Web-search-first research; falls back to Notion + LLM when no web hits."""
+        web_context = await self._web_search_results(request)
+        if not web_context:
+            log.info("research_agent.web_search_empty_fallback", agent=self.AGENT_ID)
+            return await self._research(request)
+
+        context_summary = request.context_package.summary or ""
+        messages = [
+            Message(role="system", content=_SYSTEM_PROMPT),
+            Message(
+                role="user",
+                content=(
+                    f"Context:\n{context_summary}\n\n"
+                    f"Web search results:\n{web_context}\n\n"
+                    f"Answer using the web results above and cite the URLs: {request.raw_input}"
+                ),
+            ),
+        ]
+        return await self._llm_complete(request, messages)
 
     async def _llm_chat(self, request: AgentRequest) -> HandlerResult:
         context_summary = request.context_package.summary or ""

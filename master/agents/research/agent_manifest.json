@@ -3,6 +3,7 @@
   "description": "Research agent — search, read pages, query knowledge bases",
   "allowed_tools": {
     "notion": ["search_pages", "read_page", "query_database"],
-    "github": ["get_repo_summary", "list_prs"]
+    "github": ["get_repo_summary", "list_prs"],
+    "web_search": ["search"]
   }
 }

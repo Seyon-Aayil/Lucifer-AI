@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     vllm_base_url: str | None = None
     vllm_model: str | None = None
 
+    # ── Web Search MCP ─────────────────────────────────────────────────────
+    # API key for the web-search MCP server's backend (Brave/Tavily/etc.),
+    # injected via the server's env_vars (${web_search_api_key}).
+    web_search_api_key: str | None = None
+
     # ── Mem0 ───────────────────────────────────────────────────────────────
     mem0_api_url: str = "http://localhost:8090"
     mem0_api_key: str = Field(..., min_length=8)
