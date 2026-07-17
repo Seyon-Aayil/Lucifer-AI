@@ -11,7 +11,9 @@ import pytest
 from master.agents.librarian.decay_scheduler import (
     _DECAY_RATE,
     _DELETE_THRESHOLD,
+    SOFT_DELETE_HORIZON_DAYS,
     DecayScheduler,
+    _latest,
     _parse_dt,
 )
 
@@ -76,12 +78,26 @@ def test_attach_default_2am():
 # ── run_decay_cycle ───────────────────────────────────────────────────────────
 
 
-def _make_node(node_id: str, decay_score: float | None, days_old: float) -> dict:
-    updated = datetime.now(UTC) - timedelta(days=days_old)
+def _make_node(
+    node_id: str,
+    decay_score: float | None,
+    days_old: float,
+    read_days_ago: float | None = None,
+) -> dict:
+    """
+    Build a fetched-node dict.
+
+    Args:
+        days_old: days since the node was last *written* (updatedAt).
+        read_days_ago: days since the node was last *read* (lastAccessedAt).
+            None means never read.
+    """
+    now = datetime.now(UTC)
     return {
         "id": node_id,
         "decayScore": decay_score,
-        "updatedAt": updated,
+        "updatedAt": now - timedelta(days=days_old),
+        "lastAccessedAt": (None if read_days_ago is None else now - timedelta(days=read_days_ago)),
     }
 
 
@@ -214,6 +230,147 @@ async def test_empty_node_list_returns_zero_stats(graph_client):
     assert stats == {"updated": 0, "soft_deleted": 0, "errors": 0}
 
 
+# ── _latest ───────────────────────────────────────────────────────────────────
+
+
+def test_latest_all_none():
+    assert _latest(None, None) is None
+
+
+def test_latest_picks_most_recent():
+    older = datetime(2026, 1, 1, tzinfo=UTC)
+    newer = datetime(2026, 6, 1, tzinfo=UTC)
+    assert _latest(older, newer) == newer
+    assert _latest(newer, older) == newer
+
+
+def test_latest_ignores_none():
+    dt = datetime(2026, 1, 1, tzinfo=UTC)
+    assert _latest(None, dt) == dt
+    assert _latest(dt, None) == dt
+
+
+# ── Soft-delete horizon (ADR-011 regression guard) ────────────────────────────
+#
+# These tests exist because the previous implementation multiplied the
+# already-decayed score by exp(-rate * days_since_write), compounding nightly to
+# exp(-rate * N(N+1)/2) and killing nodes at ~8 days instead of the documented
+# ~30. The old suite never caught it: every test ran a SINGLE cycle from a fresh
+# score of 1.0, where the buggy and correct formulas agree. The horizon and the
+# multi-night cases below are what actually pin the behaviour.
+
+
+@pytest.mark.asyncio
+async def test_node_just_under_horizon_survives(graph_client):
+    ds = DecayScheduler(graph_client)
+    _stub_fetch(ds, [_make_node("n29", 1.0, days_old=SOFT_DELETE_HORIZON_DAYS - 1)])
+    stats = await ds.run_decay_cycle()
+    assert stats["soft_deleted"] == 0, "a node written 29 days ago must survive"
+    assert stats["updated"] == 1
+
+
+@pytest.mark.asyncio
+async def test_node_just_over_horizon_soft_deleted(graph_client):
+    ds = DecayScheduler(graph_client)
+    _stub_fetch(ds, [_make_node("n31", 1.0, days_old=SOFT_DELETE_HORIZON_DAYS + 1)])
+    stats = await ds.run_decay_cycle()
+    assert stats["soft_deleted"] == 1, "a node written 31 days ago must be soft-deleted"
+    graph_client.soft_delete_node.assert_awaited_once_with("n31")
+
+
+@pytest.mark.asyncio
+async def test_repeated_cycles_do_not_compound(graph_client):
+    """
+    THE regression test for ADR-011.
+
+    Simulate 10 consecutive nightly runs against a node written 8 days ago,
+    feeding each run's output score back in as the buggy version did. The score
+    must be identical every night — decay is a pure function of recency, not of
+    the previous score — and the node must never be soft-deleted.
+    """
+    ds = DecayScheduler(graph_client)
+    node = _make_node("n8", 1.0, days_old=8)
+    scores = []
+
+    for _ in range(10):
+        graph_client.update_decay_scores.reset_mock()
+        graph_client.soft_delete_node.reset_mock()
+        _stub_fetch(ds, [dict(node)])
+        stats = await ds.run_decay_cycle()
+
+        assert stats["soft_deleted"] == 0, "8-day-old node must never be soft-deleted"
+        emitted = graph_client.update_decay_scores.await_args.args[0]["n8"]
+        scores.append(emitted)
+        # Feed the result back in, exactly as the nightly job re-reads it.
+        node["decayScore"] = emitted
+
+    # Stable across all 10 runs. Tolerance is for wall-clock drift between
+    # cycles (microseconds of real elapsed time), not for algorithmic decay.
+    for i, score in enumerate(scores):
+        assert score == pytest.approx(scores[0], rel=1e-6), (
+            f"run {i} drifted from run 0 — decay is compounding: {scores}"
+        )
+    assert scores[0] == pytest.approx(math.exp(-_DECAY_RATE * 8), rel=1e-6)
+
+    # Explicitly assert the old bug is gone. The previous implementation
+    # (score *= exp(-rate * days_since_write)) would reach
+    # exp(-rate * 8 * 10) ≈ 0.0004 by run 10 and soft-delete on run 2.
+    buggy_run_10 = math.exp(-_DECAY_RATE * 8 * 10)
+    assert scores[-1] > _DELETE_THRESHOLD > buggy_run_10
+
+
+@pytest.mark.asyncio
+async def test_read_keeps_node_alive_past_write_horizon(graph_client):
+    """A node written 60 days ago but read yesterday must survive."""
+    ds = DecayScheduler(graph_client)
+    _stub_fetch(ds, [_make_node("hot", 0.01, days_old=60, read_days_ago=1)])
+    stats = await ds.run_decay_cycle()
+    assert stats["soft_deleted"] == 0
+    score = graph_client.update_decay_scores.await_args.args[0]["hot"]
+    assert score == pytest.approx(math.exp(-_DECAY_RATE * 1), rel=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_stale_read_does_not_rescue_node(graph_client):
+    """Read AND write both older than the horizon → still soft-deleted."""
+    ds = DecayScheduler(graph_client)
+    _stub_fetch(ds, [_make_node("cold", 1.0, days_old=90, read_days_ago=45)])
+    stats = await ds.run_decay_cycle()
+    assert stats["soft_deleted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_node_with_only_last_accessed_is_scored(graph_client):
+    """lastAccessedAt alone is enough — never-rewritten nodes still get scored."""
+    ds = DecayScheduler(graph_client)
+    _stub_fetch(
+        ds,
+        [{"id": "n1", "decayScore": 0.5, "updatedAt": None, "lastAccessedAt": datetime.now(UTC)}],
+    )
+    stats = await ds.run_decay_cycle()
+    assert stats["updated"] == 1
+    assert graph_client.update_decay_scores.await_args.args[0]["n1"] == pytest.approx(1.0, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_score_ignores_previous_value(graph_client):
+    """Two nodes, same recency, wildly different stored scores → same new score."""
+    ds = DecayScheduler(graph_client)
+    _stub_fetch(ds, [_make_node("a", 1.0, days_old=3), _make_node("b", 0.06, days_old=3)])
+    await ds.run_decay_cycle()
+    emitted = graph_client.update_decay_scores.await_args.args[0]
+    assert emitted["a"] == pytest.approx(emitted["b"], rel=1e-9)
+
+
+@pytest.mark.asyncio
+async def test_future_timestamp_clamps_to_full_score(graph_client):
+    """Clock skew must not produce a score above 1.0."""
+    ds = DecayScheduler(graph_client)
+    _stub_fetch(ds, [_make_node("skew", 1.0, days_old=-5)])
+    await ds.run_decay_cycle()
+    assert graph_client.update_decay_scores.await_args.args[0]["skew"] == pytest.approx(1.0)
+
+
 # ── Decay math sanity ─────────────────────────────────────────────────────────
 
 
@@ -224,3 +381,11 @@ def test_decay_rate_halves_in_seven_days():
 
 def test_delete_threshold_below_one():
     assert 0 < _DELETE_THRESHOLD < 1
+
+
+def test_soft_delete_horizon_is_30_days():
+    """
+    The documented contract: ~30 days of no read and no write before deletion.
+    Derived from rate + threshold, so this test fails if either drifts.
+    """
+    assert 30.0 < SOFT_DELETE_HORIZON_DAYS < 31.0

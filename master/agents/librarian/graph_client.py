@@ -108,7 +108,7 @@ class GraphClient:
     # the order_by clause out of injection range (the property name is
     # interpolated into Cypher, not parameterised).
     _ORDER_BY_ALLOWLIST: frozenset[str] = frozenset(
-        {"decayScore", "relevance_score", "published_at", "updatedAt"}
+        {"decayScore", "relevance_score", "published_at", "updatedAt", "lastAccessedAt"}
     )
 
     async def list_nodes_by_type(
@@ -209,6 +209,63 @@ class GraphClient:
                 return [{"node": dict(r["n"]), "score": r["score"]} for r in records]
 
     # ── Batch Operations ─────────────────────────────────────────────────────
+
+    # Server-side debounce window for lastAccessedAt writes. The value is a
+    # coarse recency signal for decay scoring, not an audit record, so one write
+    # per node per hour is ample and keeps hot reads cheap.
+    _TOUCH_DEBOUNCE_HOURS: int = 1
+
+    async def touch_nodes(self, node_ids: list[str]) -> int:
+        """
+        Stamp `lastAccessedAt` on nodes that were just read.
+
+        This is what makes decay a *decay* model rather than a write-recency
+        model: without it, a node that is read daily but never re-written still
+        decays to soft-deletion (ADR-011). The decay scheduler scores against
+        max(updatedAt, lastAccessedAt).
+
+        Debounced in Cypher, not in the client: the WHERE clause skips nodes
+        touched within the last `_TOUCH_DEBOUNCE_HOURS`, so concurrent readers
+        and process restarts cannot defeat it and no client-side state is needed.
+
+        Never raises — a failure to stamp must not fail the read that triggered
+        it. Returns the number of nodes actually stamped (0 when all were within
+        the debounce window).
+
+        Args:
+            node_ids: ids of nodes just returned to a caller. Empty list is a no-op.
+
+        Returns:
+            Count of nodes whose lastAccessedAt was written.
+        """
+        if not node_ids:
+            return 0
+        try:
+            with tracer.start_as_current_span("neo4j.touch_nodes"):
+                async with self._driver.session() as session:
+                    result = await session.run(
+                        """
+                        UNWIND $ids AS nid
+                        MATCH (n {id: nid})
+                        WHERE n.deletedAt IS NULL
+                          AND (
+                                n.lastAccessedAt IS NULL
+                             OR n.lastAccessedAt < datetime() - duration({hours: $hours})
+                          )
+                        SET n.lastAccessedAt = datetime()
+                        RETURN count(n) AS touched
+                        """,
+                        ids=node_ids,
+                        hours=self._TOUCH_DEBOUNCE_HOURS,
+                    )
+                    record = await result.single()
+                    touched = int(record["touched"]) if record else 0
+            if touched:
+                log.debug("graph.nodes.touched", count=touched, requested=len(node_ids))
+            return touched
+        except Exception as exc:
+            log.warning("graph.touch_nodes.failed", error=str(exc), count=len(node_ids))
+            return 0
 
     async def update_decay_scores(self, scores: dict[str, float]) -> None:
         """

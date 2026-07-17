@@ -45,6 +45,8 @@ class ContextBuilder:
     """
 
     def __init__(self, graph_client: GraphClient | None = None) -> None:
+        # Strong refs to in-flight lastAccessedAt stamps; see _touch_async.
+        self._touch_tasks: set[asyncio.Task[int]] = set()
         self._gc = graph_client
         self._mem0 = Mem0Client()
         self._zep = ZepClient()
@@ -111,10 +113,30 @@ class ContextBuilder:
                     q=query,
                 )
                 records = await result.data()
-                return [{"labels": list(r["n"].labels), **dict(r["n"])} for r in records]
+                nodes = [{"labels": list(r["n"].labels), **dict(r["n"])} for r in records]
         except Exception as exc:
             log.warning("context_builder.neo4j_failed", error=str(exc))
             return []
+
+        # Reading a node is evidence it still matters. Stamp lastAccessedAt so
+        # the nightly decay pass scores it as live (ADR-011). Fire-and-forget:
+        # a context build must not wait on, or fail because of, a recency stamp.
+        self._touch_async([n["id"] for n in nodes if n.get("id")])
+        return nodes
+
+    def _touch_async(self, node_ids: list[str]) -> None:
+        """
+        Schedule a non-blocking lastAccessedAt stamp for the given nodes.
+
+        The task reference is retained until completion — asyncio only holds a
+        weak reference to running tasks, so an unreferenced task can be garbage
+        collected mid-flight and the stamp silently lost.
+        """
+        if not node_ids or self._gc is None:
+            return
+        task = asyncio.create_task(self._gc.touch_nodes(node_ids))
+        self._touch_tasks.add(task)
+        task.add_done_callback(self._touch_tasks.discard)
 
     async def _fetch_mem0(self, user_id: str, query: str) -> list[dict[str, Any]]:
         return await self._mem0.search(user_id=user_id, query=query, limit=10)
