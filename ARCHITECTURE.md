@@ -415,11 +415,40 @@ interface GraphNode {
   attributes: Record<string, unknown>;
   classification: "public" | "standard" | "restricted" | "secret";
   createdAt: Date;
-  lastAccessedAt: Date;
+  updatedAt: Date;               // last write
+  lastAccessedAt: Date;          // last read; stamped by GraphClient.touch_nodes()
   decayScore: number;            // 0–1, nightly update; drives pruning
   embeddingVector?: Float32Array; // 1536-dim, for semantic retrieval
   sourceAgent: string;
 }
+```
+
+**Decay contract** (`master/agents/librarian/decay_scheduler.py`):
+
+```
+reference = max(updatedAt, lastAccessedAt)   // a read counts as much as a write
+score     = exp(-DECAY_RATE * days_since_reference)
+horizon   = ln(1/DELETE_THRESHOLD) / DECAY_RATE   // ≈ 30.3 days → soft-delete
+```
+
+Three properties this must keep. All three were violated at some point; see
+[ADR-011](docs/ARCHITECTURE-DELTA.md):
+
+1. **Score is a pure function of recency.** It is NOT derived from the previous
+   score — doing so compounds nightly to `exp(-rate * N(N+1)/2)` and collapses
+   the horizon from ~30 days to ~8. It also makes the pass idempotent, so a
+   missed or double nightly run cannot corrupt state.
+2. **Reads keep memories alive.** Decaying from `updatedAt` alone is a
+   write-recency model, not a decay model: a node read every day but never
+   re-written would still be deleted. `lastAccessedAt` is what closes this.
+3. **Soft-delete only.** `deletedAt` is set; never `DETACH DELETE`. This
+   preserves edge history and is the only reason a decay defect is recoverable
+   rather than a post-mortem.
+
+The horizon is *derived* from the rate and threshold rather than hard-coded, and
+pinned by `test_soft_delete_horizon_is_30_days`, so the three cannot drift apart.
+
+```
 
 interface GraphEdge {
   id: string;
