@@ -1,8 +1,10 @@
 # Lucifer AI — Detailed System Architecture
 
-> **Version:** 0.3 (Phase 2 Complete)  
-> **Last Updated:** 2026-04-25  
-> **Status:** Phase 3 In Progress — Agent Swarm + News Pipeline
+> **Version:** 0.6 (Phases 0–4b shipped; Phase 4c Gate 1 cleared)  
+> **Last Updated:** 2026-07-17  
+> **Status:** Phase 4c — mobile edge client in progress (iOS simulator launch ✅;
+> Android release APK built, on-device launch pending). Phase 3 closed — agent
+> swarm, news pipeline, and live web search are wired against real graph data.
 
 ---
 
