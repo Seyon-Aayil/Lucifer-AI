@@ -34,3 +34,9 @@ mobile/android/build/
 
 # Docker
 infra/docker-compose.override.yml
+
+# Claude Code — per-developer settings (shared config lives in settings.json)
+.claude/settings.local.json
+
+# memsearch local index
+.memsearch/
