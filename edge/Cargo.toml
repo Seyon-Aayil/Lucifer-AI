@@ -30,7 +30,9 @@ tauri = { version = "2", features = ["macos-private-api"] }
 tauri-build = { version = "2", features = [] }
 async-trait = "0.1"
 rusqlite = { version = "0.32", features = ["bundled", "blob", "load_extension"] }
-sqlite-vec = "0.1"
+# Pinned exactly (W2-2): sqlite-vec is 0.x — a minor bump can change the on-disk
+# vector format for the edge KG mirror. Dependabot proposes upgrades explicitly.
+sqlite-vec = "=0.1.9"
 zerocopy = { version = "0.7", features = ["derive"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }

@@ -1,0 +1,35 @@
+# Dependabot — dependency update watch (W2-2 / ADR-008).
+# Focused on the two deps the hardening plan pins by hand: litellm (Python,
+# floor raised) and sqlite-vec (Rust, pinned exactly because a 0.x minor can
+# change the edge KG's on-disk vector format). The ecosystems are watched whole
+# so other drift surfaces too, but these two are the ones we deliberately gate.
+version: 2
+updates:
+  # --- Python (master API) ---
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+
+  # --- Rust (edge workspace) ---
+  - package-ecosystem: "cargo"
+    directory: "/edge"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "rust"
+
+  # --- GitHub Actions ---
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "ci"

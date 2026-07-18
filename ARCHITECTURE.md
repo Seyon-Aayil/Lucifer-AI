@@ -238,19 +238,21 @@ class ProviderRegistry {
 │  Full audit log of every state transition.              │
 │                                                         │
 │  ┌───────────────────────────────────────────────────┐  │
-│  │  CrewAI Sub-Graphs (Specialist Teams)             │  │
+│  │  Specialist Agent Nodes (LangGraph)               │  │
 │  │                                                   │  │
 │  │  ┌────────────┐  ┌────────────┐  ┌────────────┐  │  │
 │  │  │ Research   │  │ Financial  │  │  Health    │  │  │
-│  │  │ Crew       │  │ Crew       │  │  Crew      │  │  │
+│  │  │ Agent      │  │ Agent      │  │  Agent     │  │  │
 │  │  └────────────┘  └────────────┘  └────────────┘  │  │
+│  │                                                   │  │
+│  │  Each is a graph node calling MCP tools + LLM.    │  │
+│  │  No separate multi-agent framework (ADR-004).     │  │
 │  └───────────────────────────────────────────────────┘  │
 │                                                         │
 │  ┌───────────────────────────────────────────────────┐  │
-│  │  AutoGen Conversation (Code Execution Sandbox)    │  │
-│  │                                                   │  │
-│  │  Coding Agent ↔ Code Reviewer ↔ Test Runner      │  │
-│  │  Isolated Docker execution environment            │  │
+│  │  Coding Agent — GitHub MCP (PR review, issues)    │  │
+│  │  Sandboxed code execution: future `sandbox` MCP   │  │
+│  │  server over DockerTransport (W2-4), not AutoGen. │  │
 │  └───────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -346,7 +348,7 @@ class BaseAgent(ABC):
   Complex: escalate to master
         │
         ▼
-[Agent Execution]  ← CrewAI / AutoGen sub-tasks as needed
+[Agent Execution]  ← LangGraph agent nodes calling MCP tools + LLM
         │
         ▼
 [Response Synthesizer]
@@ -897,10 +899,10 @@ Conflict log: every resolved conflict appended to audit trail.
 - Full token budget management with hard caps
 
 ### Phase 3 — Agents + News (8 weeks)
-- All 5 agents: Financial, Coding (with AutoGen sandbox), Personal, Health, Research
+- All 5 agents: Financial, Coding (GitHub MCP), Personal, Health, Research
 - News Sync Engine: feedparser + Trafilatura + HDBSCAN + Librarian digest
 - TimescaleDB telemetry pipeline + Grafana dashboards v1
-- CrewAI sub-graphs for Research + Financial crews
+- All specialist agents are LangGraph nodes (AutoGen/CrewAI removed — ADR-004)
 
 ### Phase 4 — Edge Desktop (6 weeks)
 - Tauri 2.0 desktop app (macOS + Windows)
@@ -931,9 +933,8 @@ Conflict log: every resolved conflict appended to audit trail.
 | Layer | Technology | Version | Rationale |
 |-------|-----------|---------|-----------|
 | Master API | Python + FastAPI + asyncio | 3.12 / 0.110+ | Rich AI/ML ecosystem, async-native |
-| Agent Orchestrator | LangGraph | 0.2+ | Deterministic state machine, HitL, audit log |
-| Agent Teams | CrewAI | 0.70+ | Role-based specialist crews; fast to define |
-| Code Sandbox | AutoGen | 0.3+ | Multi-agent code execution, Docker sandbox |
+| Agent Orchestrator | LangGraph | 0.2+ | Deterministic state machine, HitL, audit log; the single orchestration model (ADR-004) |
+| Code Sandbox | MCP `sandbox` server over DockerTransport | planned (W2-4) | Same tool path as every other integration; replaces the removed AutoGen |
 | LLM Routing | RouteLLM (LMSYS) | latest | Complexity-based model routing; 60–85% cost reduction |
 | LLM Gateway | LiteLLM Proxy | latest | 100+ providers, budget caps, fallback chains |
 | Episodic Memory | Mem0 (self-hosted) | latest | Dual-store, memory poisoning guards, SOC2-ready |

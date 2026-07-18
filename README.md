@@ -94,8 +94,7 @@ Lucifer AI is a **personal AI operating system** — not just a chatbot. It:
 | Layer | Technology |
 |-------|-----------|
 | API Gateway | FastAPI + Uvicorn |
-| Orchestration | LangGraph (state graph + HitL interrupts) |
-| Multi-agent | CrewAI (specialist teams), AutoGen (code sandbox) |
+| Orchestration | LangGraph (state graph + HitL interrupts) — single orchestration model |
 | LLM Routing | RouteLLM (complexity classifier) + LiteLLM Proxy |
 | LLM Providers | Anthropic Claude, OpenAI GPT-4o, Google Gemini, Ollama (local) |
 | Memory — Episodic | Mem0 (self-hosted) |
@@ -145,7 +144,7 @@ Lucifer/
 │   │   ├── research/           # ResearchAgent — web research, papers, deep-dives
 │   │   ├── financial/          # FinancialAgent — spending, budgets, investments
 │   │   ├── health/             # HealthAgent — vitals, trends, medication
-│   │   └── coding/             # CodingAgent — AutoGen sandbox, PR review, test gen
+│   │   └── coding/             # CodingAgent — PR review, repo summaries via GitHub MCP
 │   ├── llm/
 │   │   ├── interfaces.py       # LLMProvider ABC, CompletionRequest/Response
 │   │   ├── registry.py         # ProviderRegistry with RouteLLM + circuit breaker
