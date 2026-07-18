@@ -1,11 +1,12 @@
 """
 master.agents.coding.agent
 ============================
-CodingAgent: code review, PR analysis, issue creation, and repo summaries.
+CodingAgent: code review, PR analysis, issue creation, repo summaries, and
+sandboxed code execution.
 
-Tools: GitHub MCP.
-Intents: review_pr, analyse_pr, create_issue, repo_summary, code_assist.
-Risk: LOW for reads; MEDIUM for create_issue.
+Tools: GitHub MCP, Sandbox MCP (isolated code execution).
+Intents: review_pr, analyse_pr, create_issue, repo_summary, code_assist, run_code.
+Risk: LOW for reads; MEDIUM for create_issue; HIGH for run_code (HitL-gated).
 """
 
 from __future__ import annotations
@@ -78,6 +79,7 @@ class CodingAgent(BaseAgent):
             "create_issue": self._create_issue,
             "repo_summary": self._repo_summary,
             "code_assist": self._code_assist,
+            "run_code": self._run_code,
         }
         handler = handlers.get(request.intent, self._code_assist)
         return await handler(request)  # type: ignore[no-any-return]
@@ -130,6 +132,34 @@ class CodingAgent(BaseAgent):
             ),
         ]
         return await self._llm_complete(request, messages)
+
+    async def _run_code(self, request: AgentRequest) -> HandlerResult:
+        """
+        Execute code in the sandbox MCP server (W2-4 seam).
+
+        Runs down the same MCPClient path as every other tool — manifest ACL,
+        JSON-schema validation, HMAC audit, and DockerTransport isolation (no
+        host network, resource caps, ephemeral container). This is the seam that
+        replaces the never-shipped AutoGen sandbox; multi-turn REPL and artefact
+        capture land in Phase 6.
+        """
+        if self._mcp is None:
+            return HandlerResult(text="Code execution: (MCP client not available)")
+        result = await self._mcp.invoke(
+            "sandbox",
+            "execute_code",
+            {"language": "python", "code": request.raw_input},
+        )
+        if not result.success:
+            return HandlerResult(text=f"Code execution failed: {result.error}")
+        output: dict[str, Any] = result.output or {}
+        stdout = output.get("stdout", "")
+        stderr = output.get("stderr", "")
+        exit_code = output.get("exit_code", 0)
+        body = f"Exit code: {exit_code}\n\nstdout:\n{stdout}"
+        if stderr:
+            body += f"\n\nstderr:\n{stderr}"
+        return HandlerResult(text=body)
 
     async def _code_assist(self, request: AgentRequest) -> HandlerResult:
         context_summary = request.context_package.summary or ""

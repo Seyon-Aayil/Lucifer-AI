@@ -251,8 +251,8 @@ class ProviderRegistry {
 │                                                         │
 │  ┌───────────────────────────────────────────────────┐  │
 │  │  Coding Agent — GitHub MCP (PR review, issues)    │  │
-│  │  Sandboxed code execution: future `sandbox` MCP   │  │
-│  │  server over DockerTransport (W2-4), not AutoGen. │  │
+│  │  + `sandbox` MCP server for code execution over   │  │
+│  │  DockerTransport (W2-4 seam), not AutoGen.        │  │
 │  └───────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -934,7 +934,7 @@ Conflict log: every resolved conflict appended to audit trail.
 |-------|-----------|---------|-----------|
 | Master API | Python + FastAPI + asyncio | 3.12 / 0.110+ | Rich AI/ML ecosystem, async-native |
 | Agent Orchestrator | LangGraph | 0.2+ | Deterministic state machine, HitL, audit log; the single orchestration model (ADR-004) |
-| Code Sandbox | MCP `sandbox` server over DockerTransport | planned (W2-4) | Same tool path as every other integration; replaces the removed AutoGen |
+| Code Sandbox | MCP `sandbox` server over DockerTransport | seam shipped (W2-4); REPL in Phase 6 | Same tool path as every other integration; replaces the removed AutoGen |
 | LLM Routing | RouteLLM (LMSYS) | latest | Complexity-based model routing; 60–85% cost reduction |
 | LLM Gateway | LiteLLM Proxy | latest | 100+ providers, budget caps, fallback chains |
 | Episodic Memory | Mem0 (self-hosted) | latest | Dual-store, memory poisoning guards, SOC2-ready |
