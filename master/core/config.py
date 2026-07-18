@@ -96,10 +96,14 @@ class Settings(BaseSettings):
     # cloud (MASTER-tier) dispatch. Local providers (Ollama/DESKTOP/MOBILE)
     # bypass the gate and receive the request unmodified.
     pii_cloud_dispatch_gate_enabled: bool = True
-    # Enable spaCy NER on the cloud-dispatch scan — catches person names, orgs
-    # and locations the regex patterns cannot. Degrades to regex-only when the
-    # model is unavailable (e.g. CI without en_core_web_sm).
+    # Enable Presidio NER on the cloud-dispatch scan — catches person names, orgs
+    # and locations the regex patterns cannot. Degrades to regex-only when
+    # Presidio or its spaCy model is unavailable (e.g. CI without the model).
     pii_cloud_dispatch_use_ner: bool = True
+    # Max entries in the per-scanner content-hash cache. Graph nodes are
+    # immutable between writes and the context prefix is stable across turns, so
+    # an identical block is scanned once. 0 disables caching.
+    pii_scan_cache_size: int = Field(2048, ge=0)
 
     # ── LLM Providers ──────────────────────────────────────────────────────
     anthropic_api_key: str | None = None

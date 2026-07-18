@@ -77,6 +77,7 @@ class ProviderRegistry:
         refusal_fallback: bool = True,
         pii_gate_enabled: bool = True,
         pii_use_ner: bool = True,
+        pii_cache_size: int = 2048,
         pii_scanner: PIIScanner | None = None,
     ) -> None:
         self._providers: dict[str, LLMProvider] = {p.provider_id: p for p in providers}
@@ -93,6 +94,7 @@ class ProviderRegistry:
         # dispatch so constructing a registry never eagerly loads spaCy.
         self._pii_gate_enabled = pii_gate_enabled
         self._pii_use_ner = pii_use_ner
+        self._pii_cache_size = pii_cache_size
         self._pii_scanner = pii_scanner
 
     @property
@@ -175,6 +177,7 @@ class ProviderRegistry:
             refusal_fallback=settings.refusal_fallback_enabled,
             pii_gate_enabled=settings.pii_cloud_dispatch_gate_enabled,
             pii_use_ner=settings.pii_cloud_dispatch_use_ner,
+            pii_cache_size=settings.pii_scan_cache_size,
         )
 
     async def _routellm_score(self, query: str) -> float:
@@ -334,7 +337,9 @@ class ProviderRegistry:
         if self._pii_scanner is None:
             from master.api.middleware.pii_scanner import PIIScanner
 
-            self._pii_scanner = PIIScanner(use_ner=self._pii_use_ner)
+            self._pii_scanner = PIIScanner(
+                use_ner=self._pii_use_ner, cache_size=self._pii_cache_size
+            )
         return self._pii_scanner
 
     def _pseudonymiser_for(self, provider: LLMProvider) -> Any | None:
