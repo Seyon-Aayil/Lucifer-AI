@@ -6,6 +6,13 @@ RouteLLM classifies query complexity → selects weak/strong tier.
 LiteLLM proxy executes the call and enforces budget caps.
 Circuit breaker state is tracked per provider.
 
+This is also the PII cloud-dispatch choke point (W1): every cloud call funnels
+through ``complete_with_retry``, so the assembled CompletionRequest is reversibly
+pseudonymised here before it leaves the process for a MASTER-tier provider, and
+de-pseudonymised on the way back. Local (DESKTOP/MOBILE) providers bypass it.
+AGENTS.md forbids calling provider SDKs directly, which is what makes this gate
+airtight — there is no path to a cloud model that skips the registry.
+
 Usage:
     registry = ProviderRegistry.from_settings()
     provider = await registry.select(
@@ -19,7 +26,8 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -36,6 +44,9 @@ from master.llm.interfaces import (
     ProviderSelection,
     ProviderTier,
 )
+
+if TYPE_CHECKING:
+    from master.api.middleware.pii_scanner import PIIScanner
 
 log = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -64,6 +75,9 @@ class ProviderRegistry:
         strong_model_id: str = "anthropic-claude-opus-4-8",
         weak_model_id: str = "anthropic-claude-haiku-4-5",
         refusal_fallback: bool = True,
+        pii_gate_enabled: bool = True,
+        pii_use_ner: bool = True,
+        pii_scanner: PIIScanner | None = None,
     ) -> None:
         self._providers: dict[str, LLMProvider] = {p.provider_id: p for p in providers}
         self._breakers: dict[str, CircuitBreaker] = {
@@ -75,6 +89,11 @@ class ProviderRegistry:
         self._refusal_fallback = refusal_fallback
         # Lazy-loaded RouteLLM controller
         self._routellm: Any | None = None
+        # PII cloud-dispatch gate (W1). Scanner is lazy-built on first cloud
+        # dispatch so constructing a registry never eagerly loads spaCy.
+        self._pii_gate_enabled = pii_gate_enabled
+        self._pii_use_ner = pii_use_ner
+        self._pii_scanner = pii_scanner
 
     @property
     def strong_model_id(self) -> str:
@@ -154,6 +173,8 @@ class ProviderRegistry:
             strong_model_id=f"anthropic-{settings.routellm_strong_model.split('/')[-1]}",
             weak_model_id=f"anthropic-{settings.routellm_weak_model.split('/')[-1]}",
             refusal_fallback=settings.refusal_fallback_enabled,
+            pii_gate_enabled=settings.pii_cloud_dispatch_gate_enabled,
+            pii_use_ner=settings.pii_cloud_dispatch_use_ner,
         )
 
     async def _routellm_score(self, query: str) -> float:
@@ -306,6 +327,65 @@ class ProviderRegistry:
             and provider.provider_id != self._strong_model_id
         )
 
+    # ── PII cloud-dispatch gate (W1) ─────────────────────────────────────────
+
+    def _get_pii_scanner(self) -> PIIScanner:
+        """Lazy-build the scanner on first cloud dispatch (defers spaCy load)."""
+        if self._pii_scanner is None:
+            from master.api.middleware.pii_scanner import PIIScanner
+
+            self._pii_scanner = PIIScanner(use_ner=self._pii_use_ner)
+        return self._pii_scanner
+
+    def _pseudonymiser_for(self, provider: LLMProvider) -> Any | None:
+        """
+        Return a fresh per-request pseudonymiser for cloud dispatch, or None when
+        the gate does not apply (disabled, or a local/non-MASTER provider).
+        """
+        if not self._pii_gate_enabled or provider.tier != ProviderTier.MASTER:
+            return None
+        from master.api.middleware.pii_scanner import ReversiblePseudonymiser
+
+        return ReversiblePseudonymiser(self._get_pii_scanner())
+
+    def _apply_pii_gate(self, request: CompletionRequest, pseudonymiser: Any) -> CompletionRequest:
+        """
+        Return a copy of ``request`` with every string message content
+        pseudonymised. Returns the original request unchanged when no PII is
+        found, so the clean path allocates nothing beyond the scan.
+        """
+        new_messages = []
+        changed = False
+        multimodal_seen = False
+        for msg in request.messages:
+            if isinstance(msg.content, str):
+                new_content = pseudonymiser.pseudonymise(msg.content)
+                if new_content != msg.content:
+                    changed = True
+                new_messages.append(replace(msg, content=new_content))
+            else:
+                # Multimodal (vision) content is not text-scanned here; flag it so
+                # the exposure is visible rather than silent.
+                multimodal_seen = True
+                new_messages.append(msg)
+
+        if multimodal_seen:
+            log.warning(
+                "llm.pii_gate.multimodal_unscanned", provider_tier=ProviderTier.MASTER.value
+            )
+        if not changed:
+            return request
+        log.info("llm.pii_gate.pseudonymised", values=len(pseudonymiser.mapping))
+        return replace(request, messages=new_messages)
+
+    def _restore_response(
+        self, response: CompletionResponse, pseudonymiser: Any | None
+    ) -> CompletionResponse:
+        """De-pseudonymise any tokens the model echoed back into its answer."""
+        if pseudonymiser is not None and pseudonymiser.mapping:
+            response.content = pseudonymiser.restore(response.content)
+        return response
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
     async def complete_with_retry(
         self,
@@ -324,14 +404,23 @@ class ProviderRegistry:
             estimated = provider.cost_per_input_token * request.max_tokens
             await spend_tracker.check_budget(agent_id, estimated)
 
+        # ── PII cloud-dispatch gate ────────────────────────────────────────────
+        # For MASTER-tier (cloud) providers, pseudonymise the assembled request
+        # before it leaves the process. Local providers get None here and
+        # dispatch the request unmodified. Recomputed each retry attempt from the
+        # original request, so the transform is idempotent under tenacity.
+        pseudonymiser = self._pseudonymiser_for(provider)
+        outbound = self._apply_pii_gate(request, pseudonymiser) if pseudonymiser else request
+
         try:
-            response = await provider.complete(request)
+            response = await provider.complete(outbound)
             await self.report_success(provider.provider_id)
             await self._record_spend(spend_tracker, agent_id, provider, response)
 
             # ── Refusal fallback ────────────────────────────────────────────────
             # A safety refusal is a successful 200 (not an exception), so it is
-            # handled here, after the call. Re-serve once on the strong model.
+            # handled here, after the call. Re-serve once on the strong model —
+            # with the same pseudonymised payload, never the raw request.
             if self._should_refusal_fallback(provider, response):
                 fb = self._providers.get(self._strong_model_id)
                 if fb is not None and await self._breakers[fb.provider_id].can_proceed():
@@ -341,12 +430,12 @@ class ProviderRegistry:
                         to_provider=fb.provider_id,
                         agent=agent_id,
                     )
-                    fb_response = await fb.complete(request)
+                    fb_response = await fb.complete(outbound)
                     await self.report_success(fb.provider_id)
                     await self._record_spend(spend_tracker, agent_id, fb, fb_response)
-                    return fb_response
+                    return self._restore_response(fb_response, pseudonymiser)
 
-            return response
+            return self._restore_response(response, pseudonymiser)
         except Exception as exc:
             await self.report_failure(provider.provider_id, exc)
             raise ProviderError(str(exc), provider_id=provider.provider_id) from exc

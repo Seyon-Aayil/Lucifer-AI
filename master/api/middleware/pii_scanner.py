@@ -11,6 +11,14 @@ Detection strategy:
 
 Cloud dispatch gate: content that tests positive must either be masked
 or the user must explicitly set X-Lucifer-Allow-PII: true.
+
+Two consumers, two policies:
+  * The chat router (inbound user message) uses ``scan_or_raise`` — raw PII in
+    a user's own prompt is rejected (422) unless they opt in.
+  * The provider registry's cloud-dispatch gate uses ``ReversiblePseudonymiser``
+    — personal-graph context assembled into a CompletionRequest is *reversibly
+    pseudonymised* (never destructively masked) before it reaches a cloud LLM,
+    then de-pseudonymised on the response.
 """
 
 from __future__ import annotations
@@ -191,4 +199,91 @@ class PIIScanner:
                 f"PII detected in {context}: {', '.join(sorted(categories))}. "
                 "Mask or obtain user consent before cloud dispatch."
             )
+        return text
+
+
+def _non_overlapping(matches: list[PIIMatch]) -> list[PIIMatch]:
+    """
+    Drop overlapping matches, preferring the longer span.
+
+    Regex and NER passes can tag overlapping ranges (e.g. an email whose local
+    part also trips the PERSON heuristic). Replacing overlapping spans by naive
+    offset slicing corrupts the text, so keep a non-overlapping subset.
+    """
+    kept: list[PIIMatch] = []
+    occupied: list[tuple[int, int]] = []
+    # Longest span first, then leftmost — so the more specific match wins.
+    for m in sorted(matches, key=lambda m: (-(m.end - m.start), m.start)):
+        if any(not (m.end <= s or m.start >= e) for s, e in occupied):
+            continue
+        kept.append(m)
+        occupied.append((m.start, m.end))
+    return kept
+
+
+class ReversiblePseudonymiser:
+    """
+    Stateful, reversible PII pseudonymisation scoped to a single logical request.
+
+    Unlike ``PIIScanner.scan()``'s destructive ``[EMAIL]`` masking, this replaces
+    each *distinct* PII value with a stable, numbered token (``EMAIL_1``,
+    ``PERSON_2``) so a cloud model still sees coherent, de-referenceable
+    placeholders — and the reverse mapping lets the response be de-pseudonymised
+    if the model echoes a token back.
+
+    One instance == one request. Reuse it across every message in that request so
+    the same value maps to the same token throughout (``john@x.com`` is
+    ``EMAIL_1`` in both the system and user turn).
+
+    Thread-safety: an instance is single-request scoped and not shared across
+    coroutines; the wrapped scanner is read-only and safe to share.
+    """
+
+    def __init__(self, scanner: PIIScanner) -> None:
+        self._scanner = scanner
+        self._forward: dict[str, str] = {}  # original value -> token
+        self._reverse: dict[str, str] = {}  # token -> original value
+        self._counters: dict[PIICategory, int] = {}
+
+    @property
+    def mapping(self) -> dict[str, str]:
+        """Copy of the token → original-value map used to restore the response."""
+        return dict(self._reverse)
+
+    @property
+    def has_pii(self) -> bool:
+        """True once at least one value has been pseudonymised."""
+        return bool(self._reverse)
+
+    def pseudonymise(self, text: str) -> str:
+        """Return ``text`` with every detected PII value replaced by a token."""
+        result = self._scanner.scan(text)
+        if not result.has_pii:
+            return text
+        # Replace right-to-left so earlier character offsets stay valid.
+        chars = list(text)
+        for match in sorted(_non_overlapping(result.matches), key=lambda m: m.start, reverse=True):
+            token = self._token_for(match)
+            chars[match.start : match.end] = list(token)
+        return "".join(chars)
+
+    def _token_for(self, match: PIIMatch) -> str:
+        """Return the stable token for a value, minting a new one on first sight."""
+        if match.value in self._forward:
+            return self._forward[match.value]
+        n = self._counters.get(match.category, 0) + 1
+        self._counters[match.category] = n
+        token = f"{match.category.value.upper()}_{n}"
+        self._forward[match.value] = token
+        self._reverse[token] = match.value
+        return token
+
+    def restore(self, text: str) -> str:
+        """Replace any pseudonyms in ``text`` with their original values."""
+        if not self._reverse:
+            return text
+        # Longest tokens first so PERSON_10 is restored before PERSON_1; the word
+        # boundary stops PERSON_1 from matching inside PERSON_10 as well.
+        for token in sorted(self._reverse, key=len, reverse=True):
+            text = re.sub(rf"\b{re.escape(token)}\b", self._reverse[token], text)
         return text

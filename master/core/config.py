@@ -91,6 +91,16 @@ class Settings(BaseSettings):
     # grounds, transparently re-serve it once on the strong model.
     refusal_fallback_enabled: bool = True
 
+    # ── PII cloud-dispatch gate (W1) ───────────────────────────────────────
+    # Reversibly pseudonymise PII in the assembled CompletionRequest before any
+    # cloud (MASTER-tier) dispatch. Local providers (Ollama/DESKTOP/MOBILE)
+    # bypass the gate and receive the request unmodified.
+    pii_cloud_dispatch_gate_enabled: bool = True
+    # Enable spaCy NER on the cloud-dispatch scan — catches person names, orgs
+    # and locations the regex patterns cannot. Degrades to regex-only when the
+    # model is unavailable (e.g. CI without en_core_web_sm).
+    pii_cloud_dispatch_use_ner: bool = True
+
     # ── LLM Providers ──────────────────────────────────────────────────────
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
