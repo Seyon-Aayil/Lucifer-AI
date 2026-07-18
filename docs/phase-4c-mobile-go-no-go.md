@@ -40,8 +40,8 @@ of the UI framework:
 |--------|-----|---------|-------|
 | **llama.cpp** | ✅ | ✅ | Cross-platform C/C++, Metal (iOS) + Vulkan/NNAPI (Android). The realistic common path. Rust binding: `llama-cpp-2`. |
 | **MLX** | ✅ (via `mlx-swift`) | ❌ | Apple-only. Best iOS perf, but Swift-first; `mlx-rs` on iOS is unproven. |
-| **MediaPipe LLM Inference** | ✅ | ✅ | Google, Kotlin/Swift APIs, Gemma-class models. Cross-platform but Google-model-centric. |
-| **CoreML / executorch** | ✅ | ❌(CoreML) | More plumbing; executorch is cross-platform but early. |
+| **MediaPipe LLM Inference** | ⚠️ | ⚠️ | **Maintenance-only** (Google, ~June 2026) — feature work has moved to **LiteRT-LM** (Kotlin/Swift/JS). Not a forward path; Google-model-centric. |
+| **CoreML / ExecuTorch** | ✅ | ✅ (ExecuTorch) | ExecuTorch reached **1.0 GA (Oct 2025)** — cross-platform, production-ready; the sanctioned fallback if gate 3 (llama.cpp on-device) fails. CoreML remains iOS-only. |
 
 **Recommendation for inference:** standardise on **llama.cpp** for mobile (one engine,
 both platforms, GGUF models shared with desktop). Optionally use MLX on iOS later as

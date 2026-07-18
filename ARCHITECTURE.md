@@ -83,9 +83,9 @@ Lucifer AI is a **distributed, privacy-first, self-evolving personal AI operatin
 │   EDGE: DESKTOP    │   │   EDGE: MOBILE     │  │   EDGE: WATCH    │
 │                    │   │                    │  │                  │
 │  Tauri 2.0 App     │   │  iOS / Android     │  │  watchOS /       │
-│  Ollama (GGUF)     │   │  Core ML + Apple   │  │  WearOS          │
-│  MLX (Apple Si.)   │   │  Foundation Models │  │  Sensor Bus      │
-│  Local MCP tools   │   │  ONNX Runtime      │  │  Relay → Mobile  │
+│  Ollama (GGUF)     │   │  llama.cpp (GGUF)  │  │  WearOS          │
+│  MLX (Apple Si.)   │   │  via llama-cpp-2   │  │  Sensor Bus      │
+│  Local MCP tools   │   │  Foundation Models*│  │  Relay → Mobile  │
 │  SQLite + vec      │   │  SQLite + vec      │  │  Haptic + Voice  │
 └────────────────────┘   └────────────────────┘  └──────────────────┘
 ```
@@ -203,8 +203,8 @@ class ProviderRegistry {
 | Google | Gemini Ultra/Pro/Flash | master / desktop | ✓ | ✓ | ✓ | ✗ |
 | Ollama (local) | Llama 3.x, Mistral, Phi-4 | desktop | partial | partial | ✓ | ✓ |
 | MLX (Apple Silicon) | Llama, Gemma, Qwen | desktop | ✗ | partial | ✓ | ✓ |
-| Apple Foundation Models | ~3B on-device + PCC | iOS / macOS | ✓ | ✓ | ✓ | ✓ |
-| Core ML / ONNX | Phi-4 mini, Gemma 2B | mobile | ✗ | ✗ | ✓ | ✓ |
+| Apple Foundation Models | ~3B, summarise/extract only (4K ctx cap) | iOS / macOS | ✗ | ✓ | ✓ | ✓ |
+| llama.cpp (mobile) | Llama/Gemma/Qwen INT4 GGUF | mobile (iOS + Android) | ✗ | partial | ✓ | ✓ |
 | vLLM (self-hosted) | Llama 3.1 70B+ | master | ✓ | ✓ | ✓ | ✗ |
 
 ### 3.4 Request Lifecycle
@@ -628,14 +628,41 @@ Layer 9: POST-CALL CALIBRATION
 
 ### 8.2 iOS / Android Mobile
 
-- **iOS Runtime**: Core ML + **Apple Foundation Models Framework** (WWDC 2025)
-  - ~3B on-device parameter model with LoRA adapter support
-  - Heavy tasks: offloaded to Apple Private Cloud Compute (PCC) — stateless, encrypted
-  - Fallback: Lucifer master via gRPC if PCC is insufficient
-- **Android Runtime**: ONNX Runtime + MediaPipe LLM (INT4 GGUF ≤ 400 MB)
+- **Primary runtime (both platforms)**: **llama.cpp** (GGUF) via the `llama-cpp-2`
+  Rust crate, behind the edge `Inference` trait — one engine, iOS + Android, GGUF
+  weights shared with desktop (Phase 4c decision). Metal on iOS, Vulkan/NNAPI on
+  Android. MLX-on-iOS is an optional later perf upgrade, not a dependency.
+  - ONNX Runtime and MediaPipe LLM are **not** used: MediaPipe LLM Inference went
+    maintenance-only (→ LiteRT-LM) and both fragment the single-engine story.
+  - Sanctioned fallback if the on-device llama.cpp gate fails: **ExecuTorch 1.0**
+    (GA Oct 2025), cross-platform. Not MediaPipe.
+- **Apple Foundation Models (iOS/macOS)** — a *narrow* on-device path, **never the
+  primary assistant**:
+  - Scope: on-device summarise / extract / tag only.
+  - **Hard ceiling: 4,096 tokens of context, input + output combined** — and
+    non-overridable safety guardrails. Anything larger or open-ended routes to
+    llama.cpp locally or to the Lucifer master via gRPC.
+- **Heavy tasks**: offloaded to Lucifer master via gRPC (Apple PCC may back
+  Foundation Models for its narrow scope, but is not the assistant path).
 - **Storage**: SQLite + sqlite-vec (≤ 500 MB model + ≤ 200 MB graph cache)
-- **Model Format**: Core ML `.mlpackage` (iOS) / INT4 GGUF (Android)
+- **Model Format**: INT4/INT8 GGUF (both platforms)
 - **OTA Upgrade**: Play Asset Delivery (Android) / App update + OTA delta (iOS)
+
+**2026 device-tier inference budget (design contract).** The binding constraint on
+phone inference is **prefill (prompt ingestion), not decode** — a long context
+package stalls time-to-first-token long before token/s matters. Size the context
+package to the tier, not just the model:
+
+| Tier | Example devices | On-device model | Practical context budget | Notes |
+|------|-----------------|-----------------|--------------------------|-------|
+| High | iPhone 16 Pro, Pixel 9 Pro, ≥ 8 GB RAM | 3–4B INT4 GGUF | ~4–8k prefill before TTFT hurts | Full local assistant |
+| Mid | 6 GB RAM Android, iPhone SE | 1–2B INT4 GGUF | ~2–4k prefill | Trim the Librarian block hard |
+| Low | ≤ 4 GB RAM | 0.5–1B or master-only | minimal / offload | Prefer gRPC to master |
+
+- **Prefill, not decode, is the phone constraint** — keep the injected context tight.
+- **Ollama's MLX backend needs > 32 GB** — desktop/Studio-class only, never a phone path.
+- **ONNX Runtime GenAI is 0.x preview** — if ever used, **pin the version exactly**;
+  it is not a stable dependency.
 
 | Feature | iOS | Android |
 |---------|-----|---------|
@@ -663,8 +690,8 @@ Layer 9: POST-CALL CALIBRATION
 |----------|---------|-------------|---------------|-------------|---------|
 | macOS (Apple Silicon) | MLX / Ollama | GGUF / MLX weights | ≤ 8 GB | ✓ WiFi + charging | Symlink swap; old weights 7d |
 | Windows | ONNX Runtime / Ollama | GGUF / ONNX | ≤ 6 GB | ✓ Background service | Version registry, rollback cmd |
-| iOS | Core ML + Foundation Models | `.mlpackage` + LoRA | ≤ 500 MB | ✓ App update + OTA delta | App Store rollback |
-| Android | ONNX / MediaPipe LLM | INT4 GGUF | ≤ 400 MB | ✓ Play Asset Delivery | Asset versioning, delta patch |
+| iOS | llama.cpp (`llama-cpp-2`); Foundation Models for summarise/extract only | INT4 GGUF | ≤ 500 MB | ✓ App update + OTA delta | App Store rollback |
+| Android | llama.cpp (`llama-cpp-2`) | INT4 GGUF | ≤ 400 MB | ✓ Play Asset Delivery | Asset versioning, delta patch |
 | watchOS | No model | N/A | N/A | N/A | N/A — relays to iPhone |
 
 ---
@@ -913,8 +940,8 @@ Conflict log: every resolved conflict appended to audit trail.
 - Tauri 2.0 mobile evaluation (go/no-go for React Native decision)
 
 ### Phase 5 — Mobile (8 weeks)
-- iOS: Core ML + Apple Foundation Models Framework + App Intents
-- Android: ONNX Runtime + MediaPipe LLM
+- iOS + Android: llama.cpp (GGUF) via `llama-cpp-2` behind the `Inference` trait
+- iOS: Apple Foundation Models for on-device summarise/extract only (4K ctx cap) + App Intents
 - Model upgrade system: OTA pipeline
 - Widgets, Share Extension, Dynamic Island
 - Benchmark runner per platform
@@ -952,8 +979,8 @@ Conflict log: every resolved conflict appended to audit trail.
 | Desktop App | Tauri 2.0 (Rust + WebView) | 2.x | Native perf, small binary, iOS/Android eval |
 | Desktop Inference | Ollama (GGUF) + MLX (Apple Si.) | latest | Best local DX; MLX for Apple Silicon efficiency |
 | Master Inference | vLLM (self-hosted) | latest | PagedAttention; production-grade throughput |
-| iOS Runtime | Core ML + Apple Foundation Models Framework | iOS 18+ | WWDC 2025; 3B on-device, LoRA, PCC offload |
-| Android Runtime | ONNX Runtime + MediaPipe LLM | latest | Proven; INT4 quantization for mobile |
+| iOS Runtime | llama.cpp via `llama-cpp-2`; Foundation Models (summarise/extract, 4K cap) | iOS 18+ | One engine both platforms; FM narrow-scope only |
+| Android Runtime | llama.cpp via `llama-cpp-2` | latest | GGUF shared with desktop; INT4 for mobile. MediaPipe is maintenance-only (→ LiteRT-LM) |
 | Watch | SwiftUI + WatchConnectivity | watchOS 11+ | Only native gives Watch API access; relay to iPhone |
 | Article Extraction | Trafilatura + PyMuPDF + marker | latest | Outperforms Readability; PDF layout-aware |
 | News Clustering | HDBSCAN | latest | Variable cluster sizes; no cluster-count param |
