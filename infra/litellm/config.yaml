@@ -65,6 +65,14 @@ litellm_settings:
     host: redis
     port: 6379
     db: 1
+  # LLM-native tracing (W5 / ADR-006). Inert by default: the langfuse logger
+  # initialises only when LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST
+  # are set, which happens ONLY under the observability overlay (`make up-full`).
+  # The base `make up` stack has no Langfuse keys, so this is a no-op there.
+  # Langfuse ingests exactly what LiteLLM sends the provider — and Lucifer's PII
+  # gate pseudonymises the request BEFORE dispatch (W1), so traces carry
+  # PERSON_1/EMAIL_1 tokens, never raw personal data. See registry.py.
+  success_callback: ["langfuse"]
 
 # Per-agent budget enforced via virtual keys (set in DB at startup):
 # financial-agent: $2.00/day

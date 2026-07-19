@@ -388,7 +388,15 @@ class ProviderRegistry:
     def _restore_response(
         self, response: CompletionResponse, pseudonymiser: Any | None
     ) -> CompletionResponse:
-        """De-pseudonymise any tokens the model echoed back into its answer."""
+        """
+        De-pseudonymise any tokens the model echoed back into its answer.
+
+        Ordering matters for observability (W5-3): the pseudonymised request is
+        what the provider — and therefore LiteLLM's langfuse callback — sees.
+        Restoration happens here, *after* the provider call returns, so raw
+        personal data is reconstructed only inside this process and never reaches
+        a trace backend. Traces carry PERSON_1/EMAIL_1 tokens only.
+        """
         if pseudonymiser is not None and pseudonymiser.mapping:
             response.content = pseudonymiser.restore(response.content)
         return response
