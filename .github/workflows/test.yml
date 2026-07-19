@@ -26,7 +26,7 @@ jobs:
         run: pytest master/tests/unit/ -v -m "not integration" --cov=master --cov-report=xml
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: coverage.xml
 
