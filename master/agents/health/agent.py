@@ -30,7 +30,7 @@ from master.agents.base.agent import (
 from master.core.config import get_settings
 from master.core.logging import get_logger
 from master.core.telemetry import get_tracer
-from master.llm.interfaces import CompletionRequest, Message
+from master.llm.interfaces import CompletionRequest, Message, ProviderTier
 
 log = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -160,11 +160,14 @@ class HealthAgent(BaseAgent):
     ) -> HandlerResult:
         """Force local Ollama model — health data must never reach cloud APIs."""
         settings = get_settings()
+        # Pin to the local (DESKTOP) tier so selection can only return a local
+        # provider (Ollama) — health data must never reach a cloud API, and the
+        # PII cloud-dispatch gate only guards MASTER-tier calls.
         selection = await self._llm.select(
             query=request.raw_input,
+            tier=ProviderTier.DESKTOP,
             agent_id=self.AGENT_ID,
             max_budget_usd=request.token_budget.max_cost_usd,
-            preferred_provider="ollama",  # enforce local inference
         )
         provider = selection.provider
         log.info(
