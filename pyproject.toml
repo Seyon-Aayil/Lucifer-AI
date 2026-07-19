@@ -14,7 +14,7 @@ dependencies = [
     # --- API ---
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
-    "pydantic>=2.7.0",
+    "pydantic>=2.13.4",
     # Direct imports (core/config.py, mcp/client.py, mcp/registry.py). Declared
     # explicitly rather than relied on transitively — removing crewai/zep-cloud
     # dropped the transitive pydantic-settings and broke a clean install.
