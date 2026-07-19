@@ -36,6 +36,12 @@ class Capability(enum.StrEnum):
     CODE = "code"
 
 
+# Anthropic prompt-caching economics, as multiples of the base input-token rate:
+# a cache read costs 0.1×, a cache write (creation) costs 1.25×.
+CACHE_READ_MULTIPLIER = 0.1
+CACHE_WRITE_MULTIPLIER = 1.25
+
+
 @dataclass(frozen=True)
 class TokenUsage:
     """Token consumption from a single LLM completion call."""
@@ -49,9 +55,51 @@ class TokenUsage:
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
 
-    def cost(self, cost_per_input: float, cost_per_output: float) -> float:
-        """Compute estimated cost in USD."""
-        return (self.input_tokens * cost_per_input) + (self.output_tokens * cost_per_output)
+    @property
+    def cache_hit_rate(self) -> float:
+        """
+        Fraction of input tokens served from cache (cache_read / input_tokens).
+
+        LiteLLM normalises input_tokens to include cached tokens, so this is a
+        genuine 0.0–1.0 hit-rate. 0.0 when there are no input tokens.
+        """
+        if self.input_tokens <= 0:
+            return 0.0
+        return self.cache_read_tokens / self.input_tokens
+
+    def cost(
+        self,
+        cost_per_input: float,
+        cost_per_output: float,
+        cache_read_multiplier: float = CACHE_READ_MULTIPLIER,
+        cache_write_multiplier: float = CACHE_WRITE_MULTIPLIER,
+    ) -> float:
+        """
+        Compute estimated cost in USD, pricing all four token classes.
+
+        LiteLLM normalises Anthropic usage so ``input_tokens`` (prompt_tokens)
+        INCLUDES both cache-read and cache-write tokens. To avoid double-charging,
+        the cached tokens are billed at their own rates and only the remainder is
+        billed at the full input rate:
+
+            full = input_tokens − cache_read_tokens − cache_write_tokens
+            cost = full           × cost_per_input
+                 + cache_read     × cost_per_input × 0.1
+                 + cache_write    × cost_per_input × 1.25
+                 + output_tokens  × cost_per_output
+
+        With zero cache tokens this reduces to the plain input/output pricing, so
+        existing callers are unaffected.
+        """
+        full_rate_input = max(
+            0, self.input_tokens - self.cache_read_tokens - self.cache_write_tokens
+        )
+        return (
+            full_rate_input * cost_per_input
+            + self.cache_read_tokens * cost_per_input * cache_read_multiplier
+            + self.cache_write_tokens * cost_per_input * cache_write_multiplier
+            + self.output_tokens * cost_per_output
+        )
 
 
 @dataclass

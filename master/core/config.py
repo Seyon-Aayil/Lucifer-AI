@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     # When a cloud (MASTER-tier) provider refuses a benign request on safety
     # grounds, transparently re-serve it once on the strong model.
     refusal_fallback_enabled: bool = True
+    # Second Anthropic cache_control breakpoint after the Librarian context block
+    # (W8-3). OFF by default: a cache write costs 1.25×, so enable this only once
+    # the measured cache-hit rate is ≥ 30% (see TokenUsage.cache_hit_rate).
+    anthropic_second_cache_breakpoint: bool = False
 
     # ── PII cloud-dispatch gate (W1) ───────────────────────────────────────
     # Reversibly pseudonymise PII in the assembled CompletionRequest before any

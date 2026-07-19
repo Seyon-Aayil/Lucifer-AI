@@ -130,6 +130,7 @@ class ProviderRegistry:
                         model=model,
                         litellm_proxy_url=settings.litellm_proxy_url,
                         litellm_api_key=settings.litellm_master_key,
+                        second_cache_breakpoint=settings.anthropic_second_cache_breakpoint,
                     )
                 )
 
@@ -309,9 +310,10 @@ class ProviderRegistry:
     ) -> None:
         """Record actual spend for a completed call, if a tracker is wired."""
         if spend_tracker and agent_id:
-            cost = (
-                response.token_usage.input_tokens * provider.cost_per_input_token
-                + response.token_usage.output_tokens * provider.cost_per_output_token
+            # Route through TokenUsage.cost() so cache-read/write tokens are priced
+            # (0.1× / 1.25×) rather than billed at the full input rate.
+            cost = response.token_usage.cost(
+                provider.cost_per_input_token, provider.cost_per_output_token
             )
             await spend_tracker.record_spend(agent_id, cost)
 

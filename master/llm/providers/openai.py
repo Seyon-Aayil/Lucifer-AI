@@ -3,6 +3,12 @@ master.llm.providers.openai
 ============================
 OpenAI adapter.
 Routes through LiteLLM proxy.
+
+Prompt caching (W8-4): OpenAI applies prefix caching **automatically** for
+prompts ≥ 1024 tokens — there is no cache_control to set and no per-call opt-in.
+The absence of explicit cache handling here is intentional, not an oversight:
+the stable-ordered context prefix (W8-2) is what makes those automatic hits land.
+Cache-read tokens still surface in usage and are priced by TokenUsage.cost().
 """
 
 from __future__ import annotations
