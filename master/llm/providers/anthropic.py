@@ -69,6 +69,11 @@ _STRUCTURED_OUTPUT_MARKERS: tuple[str, ...] = (
 )
 
 
+# Marker on a Message.name that flags it as the stable Librarian context block,
+# eligible for the second cache_control breakpoint (W8-3).
+_CONTEXT_MARKER = "librarian_context"
+
+
 def _omit_sampling_params(model: str) -> bool:
     """Return True if sampling params must be omitted for this model (else 400)."""
     return any(marker in model for marker in _NO_SAMPLING_PARAM_MARKERS)
@@ -97,11 +102,13 @@ class AnthropicProvider(LLMProvider):
         litellm_proxy_url: str,
         litellm_api_key: str,
         max_context_tokens: int = 200_000,
+        second_cache_breakpoint: bool = False,
     ) -> None:
         self._model = model
         self._proxy_url = litellm_proxy_url
         self._api_key = litellm_api_key
         self._max_context = max_context_tokens
+        self._second_cache_breakpoint = second_cache_breakpoint
         in_cost, out_cost = _MODEL_COSTS.get(model, (0.0, 0.0))
         self._in_cost = in_cost
         self._out_cost = out_cost
@@ -163,8 +170,14 @@ class AnthropicProvider(LLMProvider):
         messages = []
         for msg in request.messages:
             entry: dict[str, Any] = {"role": msg.role, "content": msg.content}
-            # Enable Anthropic prompt caching on system messages (≥1024 tokens)
-            if msg.role == "system" and isinstance(msg.content, str):
+            # Breakpoint 1: the system prompt (always).
+            # Breakpoint 2 (W8-3, flagged): a message tagged as the stable
+            # Librarian context block. Anthropic allows up to 4 breakpoints;
+            # this adds the second only when the flag is on, so a churning
+            # context block never pays the 1.25× cache-write cost by default.
+            is_system = msg.role == "system"
+            is_context = self._second_cache_breakpoint and msg.name == _CONTEXT_MARKER
+            if (is_system or is_context) and isinstance(msg.content, str):
                 entry["content"] = [
                     {
                         "type": "text",
@@ -210,6 +223,9 @@ class AnthropicProvider(LLMProvider):
                 model=self._model,
                 input_tokens=token_usage.input_tokens,
                 output_tokens=token_usage.output_tokens,
+                cache_read_tokens=token_usage.cache_read_tokens,
+                cache_write_tokens=token_usage.cache_write_tokens,
+                cache_hit_rate=round(token_usage.cache_hit_rate, 3),
                 cost_usd=round(cost, 8),
                 latency_ms=latency_ms,
             )

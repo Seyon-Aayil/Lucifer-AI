@@ -1,0 +1,99 @@
+version: "3.9"
+
+# ============================================================
+# Lucifer AI — Observability overlay (W5 / ADR-006)
+#
+# Opt-in LLM-native tracing with Langfuse, layered ON TOP of the base stack:
+#
+#   make up-full
+#     ≡ docker compose -f infra/docker-compose.yml \
+#                       -f infra/docker-compose.observability.yml up -d
+#
+# This is deliberately NOT in docker-compose.yml: Langfuse v3 brings its own
+# Postgres + ClickHouse, which is too heavy for the default single-user box.
+# The default `make up` stays at 14 services. This overlay adds Langfuse and
+# injects its keys into the existing litellm service so the success_callback
+# (already declared in litellm/config.yaml) activates — no application code.
+# ============================================================
+
+services:
+  # ── Langfuse's own Postgres (transactional store) ─────────
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: lucifer-langfuse-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse-local-dev}
+    volumes:
+      - langfuse_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── ClickHouse (traces / observations, analytical store) ──
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: lucifer-langfuse-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse-local-dev}
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Langfuse web + ingestion worker ───────────────────────
+  langfuse:
+    image: langfuse/langfuse:3
+    container_name: lucifer-langfuse
+    restart: unless-stopped
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse-local-dev}@langfuse-db:5432/langfuse
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-langfuse-local-dev}
+      # Reuse the base stack's Redis on a dedicated db to avoid a 4th datastore.
+      REDIS_CONNECTION_STRING: redis://redis:6379/3
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-changeme-langfuse-nextauth-secret}
+      SALT: ${LANGFUSE_SALT:-changeme-langfuse-salt}
+      # Bootstrap a project + API keys so the litellm callback can authenticate
+      # on first boot without a manual UI step.
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-local-dev}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-local-dev}
+      TELEMETRY_ENABLED: "false"
+    ports:
+      - "3000:3000"
+
+  # ── Overlay the base litellm service to activate the callback ─
+  # Only the env is added here; image/command/volumes are inherited from the
+  # base compose file. LANGFUSE_* keys are what flip success_callback on.
+  litellm:
+    environment:
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-local-dev}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-local-dev}
+      LANGFUSE_HOST: http://langfuse:3000
+    depends_on:
+      redis:
+        condition: service_healthy
+      langfuse:
+        condition: service_started
+
+volumes:
+  langfuse_db_data:
+  langfuse_clickhouse_data:

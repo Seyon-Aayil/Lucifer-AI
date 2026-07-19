@@ -19,6 +19,14 @@ up: ## Start all Docker Compose services
 	@sleep 5
 	@docker compose -f infra/docker-compose.yml ps
 
+up-full: ## Start the dev stack + Langfuse observability overlay (W5)
+	@echo "$(CYAN)Starting Lucifer dev stack + Langfuse observability...$(RESET)"
+	docker compose -f infra/docker-compose.yml -f infra/docker-compose.observability.yml up -d
+	@echo "$(CYAN)Waiting for services...$(RESET)"
+	@sleep 5
+	@docker compose -f infra/docker-compose.yml -f infra/docker-compose.observability.yml ps
+	@echo "$(CYAN)Langfuse UI: http://localhost:3000$(RESET)"
+
 down: ## Stop all Docker Compose services
 	docker compose -f infra/docker-compose.yml down
 

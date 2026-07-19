@@ -3,6 +3,14 @@ master.llm.providers.google
 ============================
 Google Gemini adapter.
 Routes through LiteLLM proxy.
+
+Prompt caching (W8-4): unlike OpenAI (automatic prefix caching) and Anthropic
+(explicit cache_control breakpoints), Gemini requires **explicit context caching**
+— a CachedContent object created up front and referenced by handle. That handle
+lifecycle (create / TTL / reuse keyed by the stable context prefix from W8-2) is a
+scoped follow-up; wire it here behind the same hit-rate gate as W8-3 once the
+metric (TokenUsage.cache_hit_rate) shows it pays off. Cache-read tokens reported
+in usage are already priced by TokenUsage.cost().
 """
 
 from __future__ import annotations

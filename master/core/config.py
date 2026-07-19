@@ -90,6 +90,30 @@ class Settings(BaseSettings):
     # When a cloud (MASTER-tier) provider refuses a benign request on safety
     # grounds, transparently re-serve it once on the strong model.
     refusal_fallback_enabled: bool = True
+    # Second Anthropic cache_control breakpoint after the Librarian context block
+    # (W8-3). OFF by default: a cache write costs 1.25×, so enable this only once
+    # the measured cache-hit rate is ≥ 30% (see TokenUsage.cache_hit_rate).
+    anthropic_second_cache_breakpoint: bool = False
+    # Session-affinity routing (W6 / ADR-005): pin a session's first-turn model
+    # and skip RouteLLM reclassification on later turns, so provider-side prompt
+    # caches keyed to that model survive a follow-up ("thanks!") that would
+    # otherwise route to a different tier and invalidate the cached prefix.
+    session_routing_affinity_enabled: bool = False
+    session_routing_affinity_ttl_seconds: int = 3600
+
+    # ── PII cloud-dispatch gate (W1) ───────────────────────────────────────
+    # Reversibly pseudonymise PII in the assembled CompletionRequest before any
+    # cloud (MASTER-tier) dispatch. Local providers (Ollama/DESKTOP/MOBILE)
+    # bypass the gate and receive the request unmodified.
+    pii_cloud_dispatch_gate_enabled: bool = True
+    # Enable Presidio NER on the cloud-dispatch scan — catches person names, orgs
+    # and locations the regex patterns cannot. Degrades to regex-only when
+    # Presidio or its spaCy model is unavailable (e.g. CI without the model).
+    pii_cloud_dispatch_use_ner: bool = True
+    # Max entries in the per-scanner content-hash cache. Graph nodes are
+    # immutable between writes and the context prefix is stable across turns, so
+    # an identical block is scanned once. 0 disables caching.
+    pii_scan_cache_size: int = Field(2048, ge=0)
 
     # ── LLM Providers ──────────────────────────────────────────────────────
     anthropic_api_key: str | None = None
@@ -98,6 +122,18 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     vllm_base_url: str | None = None
     vllm_model: str | None = None
+
+    # ── MCP supply chain (W3) ──────────────────────────────────────────────
+    # Treat MCP tool results as untrusted: scan returned content for prompt-
+    # injection before it can re-enter a prompt. Log-and-flag by default — a
+    # false positive here would silently drop a legitimate result (e.g. an
+    # email), which is worse than the attack. Flip to enforce only after a
+    # 2-week observation window (ADR-003 / W3-3).
+    mcp_untrusted_result_enforcement: bool = False
+    # Require MCP Docker images to be pinned by @sha256: digest, not a mutable
+    # tag (rug-pull defence, W3-2). Off until the published images carry
+    # digests; the current manifest uses :latest placeholders.
+    mcp_require_image_digest: bool = False
 
     # ── Web Search MCP ─────────────────────────────────────────────────────
     # API key for the web-search MCP server's backend (Brave/Tavily/etc.),

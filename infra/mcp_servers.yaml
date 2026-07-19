@@ -3,6 +3,14 @@
 # Defines all MCP server configurations used by agents.
 # Each entry maps to an MCPServerConfig instance loaded at startup.
 # Allowed agents enforce the agent manifest ACL per tool.
+#
+# Supply chain (W3):
+#   * Every tool name + description is scanned for prompt-injection in CI
+#     (python -m master.mcp.manifest_scan — a required check).
+#   * docker_image SHOULD be pinned by @sha256: digest, not a mutable tag —
+#     e.g. lucifer/mcp-gmail@sha256:<hash>. Set mcp_require_image_digest=true to
+#     make DockerTransport reject un-pinned images. The :latest tags below are
+#     placeholders until the images are built and published with digests.
 # =============================================================================
 
 servers:
@@ -303,3 +311,30 @@ servers:
             query: { type: string }
             max_results: { type: integer, default: 5 }
           additionalProperties: false
+
+  # ── Code Execution Sandbox ───────────────────────────────────────────────────
+  # Replaces the never-shipped AutoGen sandbox (ADR-004 / W2-4). Code execution
+  # runs down the SAME path as every other tool: DockerTransport isolation (no
+  # host network, 256 MB / 0.5 CPU caps, ephemeral container), agent-manifest
+  # ACL, JSON-schema validation, and HMAC audit. This is the seam — multi-turn
+  # REPL and artefact capture land in Phase 6.
+  - server_id: sandbox
+    display_name: Code Execution Sandbox MCP
+    transport: stdio
+    auth_method: docker_internal
+    docker_image: lucifer/mcp-sandbox:latest
+    allowed_agents:
+      - coding-agent
+    tools:
+      - name: execute_code
+        description: Run a code snippet in an isolated, network-less Docker sandbox; returns stdout, stderr, and exit code.
+        input_schema:
+          type: object
+          required: [language, code]
+          properties:
+            language: { type: string, enum: [python, bash, node] }
+            code: { type: string }
+            timeout_seconds: { type: integer, default: 10, maximum: 60 }
+            stdin: { type: string }
+          additionalProperties: false
+        requires_confirmation: true

@@ -70,8 +70,14 @@ class ContextBuilder:
                 return_exceptions=False,
             )
 
-            # ACL-filter graph nodes
-            allowed_nodes = filter_nodes_for_agent(agent_id, neo4j_nodes, operation="read")
+            # ACL-filter graph nodes, then order deterministically (W8-2). The
+            # Neo4j MATCH has no ORDER BY, so raw order varies between identical
+            # queries — which churns the assembled prompt prefix and defeats
+            # prompt caching. A stable sort makes the context block cache-able.
+            allowed_nodes = sorted(
+                filter_nodes_for_agent(agent_id, neo4j_nodes, operation="read"),
+                key=_stable_node_key,
+            )
 
             summary = _build_summary(agent_id, intent, allowed_nodes, mem0_memories, zep_facts)
             token_estimate = len(summary) // 4  # rough estimate
@@ -143,6 +149,19 @@ class ContextBuilder:
 
     async def _fetch_zep(self, user_id: str, query: str) -> list[dict[str, Any]]:
         return await self._zep.search(user_id=user_id, query=query, limit=10)
+
+
+def _stable_node_key(node: dict[str, Any]) -> tuple[float, str]:
+    """
+    Deterministic sort key for a graph node: highest relevance first, ties
+    broken by node id. Guarantees an identical prefix for identical retrievals,
+    which is what makes the injected context block prompt-cacheable (W8-2).
+    """
+    try:
+        relevance = float(node.get("relevance_score", 0) or 0)
+    except (TypeError, ValueError):
+        relevance = 0.0
+    return (-relevance, str(node.get("id", "")))
 
 
 # ── Summary builder ───────────────────────────────────────────────────────────

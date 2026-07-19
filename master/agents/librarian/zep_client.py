@@ -13,6 +13,12 @@ that accumulates timestamped episodes. Zep's Graphiti engine derives
 temporal facts and entity relationships from the episode stream.
 
 All operations degrade gracefully: errors are logged but never raised.
+
+Why no `zep-cloud` SDK (ADR-008 / W2-2): this client speaks the self-hosted Zep
+v2 REST API directly over httpx. The hosted `zep-cloud` package is deliberately
+NOT a dependency — Lucifer is privacy-first and single-tenant, so personal
+memory never leaves the self-hosted deployment for Zep's managed cloud. Do not
+reintroduce the SDK; extend this httpx client instead.
 """
 
 from __future__ import annotations

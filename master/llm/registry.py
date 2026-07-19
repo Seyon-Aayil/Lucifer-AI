@@ -6,6 +6,13 @@ RouteLLM classifies query complexity → selects weak/strong tier.
 LiteLLM proxy executes the call and enforces budget caps.
 Circuit breaker state is tracked per provider.
 
+This is also the PII cloud-dispatch choke point (W1): every cloud call funnels
+through ``complete_with_retry``, so the assembled CompletionRequest is reversibly
+pseudonymised here before it leaves the process for a MASTER-tier provider, and
+de-pseudonymised on the way back. Local (DESKTOP/MOBILE) providers bypass it.
+AGENTS.md forbids calling provider SDKs directly, which is what makes this gate
+airtight — there is no path to a cloud model that skips the registry.
+
 Usage:
     registry = ProviderRegistry.from_settings()
     provider = await registry.select(
@@ -19,7 +26,9 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import time
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -36,6 +45,9 @@ from master.llm.interfaces import (
     ProviderSelection,
     ProviderTier,
 )
+
+if TYPE_CHECKING:
+    from master.api.middleware.pii_scanner import PIIScanner
 
 log = get_logger(__name__)
 tracer = get_tracer(__name__)
@@ -64,6 +76,12 @@ class ProviderRegistry:
         strong_model_id: str = "anthropic-claude-opus-4-8",
         weak_model_id: str = "anthropic-claude-haiku-4-5",
         refusal_fallback: bool = True,
+        pii_gate_enabled: bool = True,
+        pii_use_ner: bool = True,
+        pii_cache_size: int = 2048,
+        pii_scanner: PIIScanner | None = None,
+        session_affinity_enabled: bool = False,
+        session_affinity_ttl_seconds: int = 3600,
     ) -> None:
         self._providers: dict[str, LLMProvider] = {p.provider_id: p for p in providers}
         self._breakers: dict[str, CircuitBreaker] = {
@@ -75,6 +93,18 @@ class ProviderRegistry:
         self._refusal_fallback = refusal_fallback
         # Lazy-loaded RouteLLM controller
         self._routellm: Any | None = None
+        # PII cloud-dispatch gate (W1). Scanner is lazy-built on first cloud
+        # dispatch so constructing a registry never eagerly loads spaCy.
+        self._pii_gate_enabled = pii_gate_enabled
+        self._pii_use_ner = pii_use_ner
+        self._pii_cache_size = pii_cache_size
+        self._pii_scanner = pii_scanner
+        # Session-affinity routing (W6): session_id -> (provider_id, effort,
+        # expiry_monotonic). Pins a session's model so follow-up turns don't
+        # reclassify and invalidate the provider-side prompt cache.
+        self._session_affinity_enabled = session_affinity_enabled
+        self._session_affinity_ttl = session_affinity_ttl_seconds
+        self._affinity: dict[str, tuple[str, str | None, float]] = {}
 
     @property
     def strong_model_id(self) -> str:
@@ -109,6 +139,7 @@ class ProviderRegistry:
                         model=model,
                         litellm_proxy_url=settings.litellm_proxy_url,
                         litellm_api_key=settings.litellm_master_key,
+                        second_cache_breakpoint=settings.anthropic_second_cache_breakpoint,
                     )
                 )
 
@@ -154,6 +185,11 @@ class ProviderRegistry:
             strong_model_id=f"anthropic-{settings.routellm_strong_model.split('/')[-1]}",
             weak_model_id=f"anthropic-{settings.routellm_weak_model.split('/')[-1]}",
             refusal_fallback=settings.refusal_fallback_enabled,
+            pii_gate_enabled=settings.pii_cloud_dispatch_gate_enabled,
+            pii_use_ner=settings.pii_cloud_dispatch_use_ner,
+            pii_cache_size=settings.pii_scan_cache_size,
+            session_affinity_enabled=settings.session_routing_affinity_enabled,
+            session_affinity_ttl_seconds=settings.session_routing_affinity_ttl_seconds,
         )
 
     async def _routellm_score(self, query: str) -> float:
@@ -203,9 +239,12 @@ class ProviderRegistry:
         required_capabilities: set[Capability] | None = None,
         agent_id: str = "unknown",
         max_budget_usd: float = 1.0,
+        session_id: str | None = None,
     ) -> ProviderSelection:
         """
         Select the most appropriate provider for a request.
+        0. Session affinity (W6): if this session already has a healthy pinned
+           provider that still satisfies the request, reuse it and skip scoring.
         1. RouteLLM scores complexity → selects preferred model + effort level.
         2. Filters candidates by tier + capabilities + circuit state + budget.
         3. Falls back through chain if preferred is unavailable.
@@ -214,6 +253,19 @@ class ProviderRegistry:
         """
         with tracer.start_as_current_span("llm.registry.select"):
             caps = required_capabilities or {Capability.TEXT}
+
+            # Session affinity: reuse the pinned model for follow-up turns so the
+            # provider-side prompt-cache prefix is not invalidated by a re-route.
+            pinned = self._affinity_pinned(session_id, tier, caps, max_budget_usd)
+            if pinned is not None:
+                provider, pinned_effort = pinned
+                if await self._breakers[provider.provider_id].can_proceed():
+                    log.debug(
+                        "routellm.affinity_hit", session=session_id, provider=provider.provider_id
+                    )
+                    return ProviderSelection(provider=provider, effort=pinned_effort)
+                # Pinned provider is unhealthy — drop the pin and route afresh.
+                self._affinity.pop(session_id, None)  # type: ignore[arg-type]
 
             # RouteLLM: pick preferred provider ID + effort level
             score = await self._routellm_score(query)
@@ -237,10 +289,48 @@ class ProviderRegistry:
                 if not await breaker.can_proceed():
                     log.debug("llm.provider.circuit_open", provider=provider.provider_id)
                     continue
+                self._affinity_store(session_id, provider.provider_id, effort)
                 return ProviderSelection(provider=provider, effort=effort)
 
             raise NoSuitableProviderError(
                 f"No healthy provider for tier={tier}, caps={caps}, agent={agent_id}"
+            )
+
+    def _affinity_pinned(
+        self,
+        session_id: str | None,
+        tier: ProviderTier,
+        caps: set[Capability],
+        max_budget_usd: float,
+    ) -> tuple[LLMProvider, str | None] | None:
+        """
+        Return the session's pinned (provider, effort) if affinity is enabled and
+        the pin is still valid: unexpired, provider present, and still satisfying
+        the current tier/capabilities/budget. Otherwise None (route afresh).
+        """
+        if not (self._session_affinity_enabled and session_id):
+            return None
+        entry = self._affinity.get(session_id)
+        if entry is None:
+            return None
+        provider_id, effort, expiry = entry
+        if time.monotonic() >= expiry:
+            self._affinity.pop(session_id, None)
+            return None
+        provider = self._providers.get(provider_id)
+        if provider is None or provider.tier != tier or not provider.supports(*caps):
+            return None
+        if provider.cost_per_input_token * 4096 > max_budget_usd:
+            return None
+        return provider, effort
+
+    def _affinity_store(self, session_id: str | None, provider_id: str, effort: str | None) -> None:
+        """Pin the chosen provider for this session, refreshing the TTL."""
+        if self._session_affinity_enabled and session_id:
+            self._affinity[session_id] = (
+                provider_id,
+                effort,
+                time.monotonic() + self._session_affinity_ttl,
             )
 
     def _rank_candidates(
@@ -285,9 +375,10 @@ class ProviderRegistry:
     ) -> None:
         """Record actual spend for a completed call, if a tracker is wired."""
         if spend_tracker and agent_id:
-            cost = (
-                response.token_usage.input_tokens * provider.cost_per_input_token
-                + response.token_usage.output_tokens * provider.cost_per_output_token
+            # Route through TokenUsage.cost() so cache-read/write tokens are priced
+            # (0.1× / 1.25×) rather than billed at the full input rate.
+            cost = response.token_usage.cost(
+                provider.cost_per_input_token, provider.cost_per_output_token
             )
             await spend_tracker.record_spend(agent_id, cost)
 
@@ -305,6 +396,75 @@ class ProviderRegistry:
             and provider.tier == ProviderTier.MASTER
             and provider.provider_id != self._strong_model_id
         )
+
+    # ── PII cloud-dispatch gate (W1) ─────────────────────────────────────────
+
+    def _get_pii_scanner(self) -> PIIScanner:
+        """Lazy-build the scanner on first cloud dispatch (defers spaCy load)."""
+        if self._pii_scanner is None:
+            from master.api.middleware.pii_scanner import PIIScanner
+
+            self._pii_scanner = PIIScanner(
+                use_ner=self._pii_use_ner, cache_size=self._pii_cache_size
+            )
+        return self._pii_scanner
+
+    def _pseudonymiser_for(self, provider: LLMProvider) -> Any | None:
+        """
+        Return a fresh per-request pseudonymiser for cloud dispatch, or None when
+        the gate does not apply (disabled, or a local/non-MASTER provider).
+        """
+        if not self._pii_gate_enabled or provider.tier != ProviderTier.MASTER:
+            return None
+        from master.api.middleware.pii_scanner import ReversiblePseudonymiser
+
+        return ReversiblePseudonymiser(self._get_pii_scanner())
+
+    def _apply_pii_gate(self, request: CompletionRequest, pseudonymiser: Any) -> CompletionRequest:
+        """
+        Return a copy of ``request`` with every string message content
+        pseudonymised. Returns the original request unchanged when no PII is
+        found, so the clean path allocates nothing beyond the scan.
+        """
+        new_messages = []
+        changed = False
+        multimodal_seen = False
+        for msg in request.messages:
+            if isinstance(msg.content, str):
+                new_content = pseudonymiser.pseudonymise(msg.content)
+                if new_content != msg.content:
+                    changed = True
+                new_messages.append(replace(msg, content=new_content))
+            else:
+                # Multimodal (vision) content is not text-scanned here; flag it so
+                # the exposure is visible rather than silent.
+                multimodal_seen = True
+                new_messages.append(msg)
+
+        if multimodal_seen:
+            log.warning(
+                "llm.pii_gate.multimodal_unscanned", provider_tier=ProviderTier.MASTER.value
+            )
+        if not changed:
+            return request
+        log.info("llm.pii_gate.pseudonymised", values=len(pseudonymiser.mapping))
+        return replace(request, messages=new_messages)
+
+    def _restore_response(
+        self, response: CompletionResponse, pseudonymiser: Any | None
+    ) -> CompletionResponse:
+        """
+        De-pseudonymise any tokens the model echoed back into its answer.
+
+        Ordering matters for observability (W5-3): the pseudonymised request is
+        what the provider — and therefore LiteLLM's langfuse callback — sees.
+        Restoration happens here, *after* the provider call returns, so raw
+        personal data is reconstructed only inside this process and never reaches
+        a trace backend. Traces carry PERSON_1/EMAIL_1 tokens only.
+        """
+        if pseudonymiser is not None and pseudonymiser.mapping:
+            response.content = pseudonymiser.restore(response.content)
+        return response
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
     async def complete_with_retry(
@@ -324,14 +484,23 @@ class ProviderRegistry:
             estimated = provider.cost_per_input_token * request.max_tokens
             await spend_tracker.check_budget(agent_id, estimated)
 
+        # ── PII cloud-dispatch gate ────────────────────────────────────────────
+        # For MASTER-tier (cloud) providers, pseudonymise the assembled request
+        # before it leaves the process. Local providers get None here and
+        # dispatch the request unmodified. Recomputed each retry attempt from the
+        # original request, so the transform is idempotent under tenacity.
+        pseudonymiser = self._pseudonymiser_for(provider)
+        outbound = self._apply_pii_gate(request, pseudonymiser) if pseudonymiser else request
+
         try:
-            response = await provider.complete(request)
+            response = await provider.complete(outbound)
             await self.report_success(provider.provider_id)
             await self._record_spend(spend_tracker, agent_id, provider, response)
 
             # ── Refusal fallback ────────────────────────────────────────────────
             # A safety refusal is a successful 200 (not an exception), so it is
-            # handled here, after the call. Re-serve once on the strong model.
+            # handled here, after the call. Re-serve once on the strong model —
+            # with the same pseudonymised payload, never the raw request.
             if self._should_refusal_fallback(provider, response):
                 fb = self._providers.get(self._strong_model_id)
                 if fb is not None and await self._breakers[fb.provider_id].can_proceed():
@@ -341,12 +510,12 @@ class ProviderRegistry:
                         to_provider=fb.provider_id,
                         agent=agent_id,
                     )
-                    fb_response = await fb.complete(request)
+                    fb_response = await fb.complete(outbound)
                     await self.report_success(fb.provider_id)
                     await self._record_spend(spend_tracker, agent_id, fb, fb_response)
-                    return fb_response
+                    return self._restore_response(fb_response, pseudonymiser)
 
-            return response
+            return self._restore_response(response, pseudonymiser)
         except Exception as exc:
             await self.report_failure(provider.provider_id, exc)
             raise ProviderError(str(exc), provider_id=provider.provider_id) from exc

@@ -204,6 +204,7 @@ class FinancialAgent(BaseAgent):
             query=request.raw_input,
             agent_id=self.AGENT_ID,
             max_budget_usd=request.token_budget.max_cost_usd,
+            session_id=request.session_id,
         )
         provider = selection.provider
         completion_req = CompletionRequest(

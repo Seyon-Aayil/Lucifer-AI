@@ -94,8 +94,7 @@ Lucifer AI is a **personal AI operating system** — not just a chatbot. It:
 | Layer | Technology |
 |-------|-----------|
 | API Gateway | FastAPI + Uvicorn |
-| Orchestration | LangGraph (state graph + HitL interrupts) |
-| Multi-agent | CrewAI (specialist teams), AutoGen (code sandbox) |
+| Orchestration | LangGraph (state graph + HitL interrupts) — single orchestration model |
 | LLM Routing | RouteLLM (complexity classifier) + LiteLLM Proxy |
 | LLM Providers | Anthropic Claude, OpenAI GPT-4o, Google Gemini, Ollama (local) |
 | Memory — Episodic | Mem0 (self-hosted) |
@@ -117,11 +116,11 @@ Lucifer AI is a **personal AI operating system** — not just a chatbot. It:
 | Platform | Technology |
 |----------|-----------|
 | macOS/Windows | Tauri 2.0 (Rust core + React frontend) |
-| iOS | SwiftUI + Apple Foundation Models Framework + Core ML |
-| Android | Jetpack Compose + ONNX Runtime + MediaPipe |
+| iOS | SwiftUI + llama.cpp (GGUF) via `llama-cpp-2`; Apple Foundation Models for on-device summarise/extract/tag only |
+| Android | Jetpack Compose + llama.cpp (GGUF) via `llama-cpp-2` |
 | Apple Watch | SwiftUI + WatchConnectivity + HealthKit + Whisper.cpp |
 | Edge Store | SQLite WAL + sqlite-vec (1536-dim float32) |
-| Local LLM | Ollama (GGUF), MLX (Apple Silicon), ONNX (Android) |
+| Local LLM | Ollama (GGUF, desktop), MLX (Apple Silicon), llama.cpp (GGUF, mobile — one engine both platforms) |
 
 ### Integrations (MCP Servers — each Dockerized)
 
@@ -145,7 +144,7 @@ Lucifer/
 │   │   ├── research/           # ResearchAgent — web research, papers, deep-dives
 │   │   ├── financial/          # FinancialAgent — spending, budgets, investments
 │   │   ├── health/             # HealthAgent — vitals, trends, medication
-│   │   └── coding/             # CodingAgent — AutoGen sandbox, PR review, test gen
+│   │   └── coding/             # CodingAgent — PR review, repo summaries via GitHub MCP
 │   ├── llm/
 │   │   ├── interfaces.py       # LLMProvider ABC, CompletionRequest/Response
 │   │   ├── registry.py         # ProviderRegistry with RouteLLM + circuit breaker
@@ -335,7 +334,7 @@ Enforces: Ruff lint, Ruff format, mypy, no secrets, no direct commits to `main`.
 | **Phase 2** — Integrations | 6 weeks | ✅ **Done** | Gmail/GCal/Notion/GitHub MCPs + Docker sandbox + budget hardening |
 | **Phase 3** — Agents + News | 8 weeks | ✅ **Done** | All 5 specialist agents + LibrarianAgent full wiring + news digest pipeline |
 | **Phase 4** — Desktop | 6 weeks | ⏳ Planned | macOS offline app (Tauri 2.0 + Ollama + gRPC sync) |
-| **Phase 5** — Mobile | 8 weeks | ⏳ Planned | iOS (Foundation Models) + Android (ONNX) + OTA upgrade |
+| **Phase 5** — Mobile | 8 weeks | ⏳ Planned | iOS + Android on llama.cpp (GGUF via `llama-cpp-2`) + OTA upgrade |
 | **Phase 6** — Watch + Polish | 6 weeks | ⏳ Planned | Apple Watch + security hardening + load testing |
 
 **DoD — Phase 1 ✅:** Message via web UI → Librarian fetches context → RouteLLM selects model → response streamed → memory delta written → telemetry emitted.
