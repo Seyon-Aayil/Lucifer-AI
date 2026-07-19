@@ -220,6 +220,17 @@ and the `ProviderSelection` return type; swap the internals. Raise the LiteLLM f
 
 **Explicitly not a blocker.** The current setup works. Do this when touching the registry anyway.
 
+**Update (W6, delivered).** Pre-flight (plan §7) confirmed: LiteLLM Auto Router v2 **does** ship
+session affinity (`session_affinity` + `session_affinity_ttl_seconds`, v1.94.x, 2026) — the entire
+rationale, so ADR-005 is *not* dropped. But the highest-leverage part (session affinity preserving
+prompt-cache prefixes) does not require the full proxy swap, and the RouteLLM-vs-Auto-Router A/B
+(W6-2) is an operational decision, not code. So the delivered slice implements **session affinity
+in `ProviderRegistry` itself**: a session's first-turn model is pinned (TTL-bounded) and follow-up
+turns skip RouteLLM reclassification, preserving the cache prefix. `select()` gained an optional
+`session_id`; the return type is unchanged; the behaviour is behind
+`session_routing_affinity_enabled` (default off). RouteLLM stays as the classifier. The proxy-level
+Auto Router swap + the 2-week A/B remain the open, non-blocking remainder of ADR-005.
+
 ---
 
 ### ADR-006 — Add Langfuse for LLM-native observability *(P2)*

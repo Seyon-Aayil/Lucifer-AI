@@ -150,6 +150,9 @@ class AgentRequest:
     trace_id: str
     raw_input: str = ""
     user_id: str | None = None
+    # Conversation-stable id (distinct from the per-turn task_id). Used for
+    # session-affinity routing so multi-turn turns pin to one model (W6).
+    session_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod

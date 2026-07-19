@@ -26,6 +26,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -79,6 +80,8 @@ class ProviderRegistry:
         pii_use_ner: bool = True,
         pii_cache_size: int = 2048,
         pii_scanner: PIIScanner | None = None,
+        session_affinity_enabled: bool = False,
+        session_affinity_ttl_seconds: int = 3600,
     ) -> None:
         self._providers: dict[str, LLMProvider] = {p.provider_id: p for p in providers}
         self._breakers: dict[str, CircuitBreaker] = {
@@ -96,6 +99,12 @@ class ProviderRegistry:
         self._pii_use_ner = pii_use_ner
         self._pii_cache_size = pii_cache_size
         self._pii_scanner = pii_scanner
+        # Session-affinity routing (W6): session_id -> (provider_id, effort,
+        # expiry_monotonic). Pins a session's model so follow-up turns don't
+        # reclassify and invalidate the provider-side prompt cache.
+        self._session_affinity_enabled = session_affinity_enabled
+        self._session_affinity_ttl = session_affinity_ttl_seconds
+        self._affinity: dict[str, tuple[str, str | None, float]] = {}
 
     @property
     def strong_model_id(self) -> str:
@@ -179,6 +188,8 @@ class ProviderRegistry:
             pii_gate_enabled=settings.pii_cloud_dispatch_gate_enabled,
             pii_use_ner=settings.pii_cloud_dispatch_use_ner,
             pii_cache_size=settings.pii_scan_cache_size,
+            session_affinity_enabled=settings.session_routing_affinity_enabled,
+            session_affinity_ttl_seconds=settings.session_routing_affinity_ttl_seconds,
         )
 
     async def _routellm_score(self, query: str) -> float:
@@ -228,9 +239,12 @@ class ProviderRegistry:
         required_capabilities: set[Capability] | None = None,
         agent_id: str = "unknown",
         max_budget_usd: float = 1.0,
+        session_id: str | None = None,
     ) -> ProviderSelection:
         """
         Select the most appropriate provider for a request.
+        0. Session affinity (W6): if this session already has a healthy pinned
+           provider that still satisfies the request, reuse it and skip scoring.
         1. RouteLLM scores complexity → selects preferred model + effort level.
         2. Filters candidates by tier + capabilities + circuit state + budget.
         3. Falls back through chain if preferred is unavailable.
@@ -239,6 +253,19 @@ class ProviderRegistry:
         """
         with tracer.start_as_current_span("llm.registry.select"):
             caps = required_capabilities or {Capability.TEXT}
+
+            # Session affinity: reuse the pinned model for follow-up turns so the
+            # provider-side prompt-cache prefix is not invalidated by a re-route.
+            pinned = self._affinity_pinned(session_id, tier, caps, max_budget_usd)
+            if pinned is not None:
+                provider, pinned_effort = pinned
+                if await self._breakers[provider.provider_id].can_proceed():
+                    log.debug(
+                        "routellm.affinity_hit", session=session_id, provider=provider.provider_id
+                    )
+                    return ProviderSelection(provider=provider, effort=pinned_effort)
+                # Pinned provider is unhealthy — drop the pin and route afresh.
+                self._affinity.pop(session_id, None)  # type: ignore[arg-type]
 
             # RouteLLM: pick preferred provider ID + effort level
             score = await self._routellm_score(query)
@@ -262,10 +289,48 @@ class ProviderRegistry:
                 if not await breaker.can_proceed():
                     log.debug("llm.provider.circuit_open", provider=provider.provider_id)
                     continue
+                self._affinity_store(session_id, provider.provider_id, effort)
                 return ProviderSelection(provider=provider, effort=effort)
 
             raise NoSuitableProviderError(
                 f"No healthy provider for tier={tier}, caps={caps}, agent={agent_id}"
+            )
+
+    def _affinity_pinned(
+        self,
+        session_id: str | None,
+        tier: ProviderTier,
+        caps: set[Capability],
+        max_budget_usd: float,
+    ) -> tuple[LLMProvider, str | None] | None:
+        """
+        Return the session's pinned (provider, effort) if affinity is enabled and
+        the pin is still valid: unexpired, provider present, and still satisfying
+        the current tier/capabilities/budget. Otherwise None (route afresh).
+        """
+        if not (self._session_affinity_enabled and session_id):
+            return None
+        entry = self._affinity.get(session_id)
+        if entry is None:
+            return None
+        provider_id, effort, expiry = entry
+        if time.monotonic() >= expiry:
+            self._affinity.pop(session_id, None)
+            return None
+        provider = self._providers.get(provider_id)
+        if provider is None or provider.tier != tier or not provider.supports(*caps):
+            return None
+        if provider.cost_per_input_token * 4096 > max_budget_usd:
+            return None
+        return provider, effort
+
+    def _affinity_store(self, session_id: str | None, provider_id: str, effort: str | None) -> None:
+        """Pin the chosen provider for this session, refreshing the TTL."""
+        if self._session_affinity_enabled and session_id:
+            self._affinity[session_id] = (
+                provider_id,
+                effort,
+                time.monotonic() + self._session_affinity_ttl,
             )
 
     def _rank_candidates(

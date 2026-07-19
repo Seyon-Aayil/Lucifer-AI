@@ -121,6 +121,7 @@ async def route_node(state: OrchestratorState) -> dict[str, Any]:
             trace_id=state.get("trace_id", str(uuid.uuid4())),
             raw_input=state.get("raw_input", ""),
             user_id=state.get("user_id"),
+            session_id=state.get("session_id"),
         )
         return {"agent_request": request}
 

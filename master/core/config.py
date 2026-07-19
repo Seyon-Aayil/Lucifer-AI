@@ -94,6 +94,12 @@ class Settings(BaseSettings):
     # (W8-3). OFF by default: a cache write costs 1.25×, so enable this only once
     # the measured cache-hit rate is ≥ 30% (see TokenUsage.cache_hit_rate).
     anthropic_second_cache_breakpoint: bool = False
+    # Session-affinity routing (W6 / ADR-005): pin a session's first-turn model
+    # and skip RouteLLM reclassification on later turns, so provider-side prompt
+    # caches keyed to that model survive a follow-up ("thanks!") that would
+    # otherwise route to a different tier and invalidate the cached prefix.
+    session_routing_affinity_enabled: bool = False
+    session_routing_affinity_ttl_seconds: int = 3600
 
     # ── PII cloud-dispatch gate (W1) ───────────────────────────────────────
     # Reversibly pseudonymise PII in the assembled CompletionRequest before any
