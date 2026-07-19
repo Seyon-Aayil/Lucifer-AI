@@ -45,3 +45,25 @@ jobs:
 
       - name: Run mypy
         run: mypy master/ --ignore-missing-imports
+
+  mcp-scan:
+    name: MCP Manifest Injection Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # Minimal deps for the scan's import chain (content_policy → core.logging
+      # → core.config): no torch/spaCy install needed, so the check stays fast.
+      - name: Install scan dependencies
+        run: pip install pyyaml structlog opentelemetry-api pydantic pydantic-settings
+
+      # Required check (ADR-003 / W3-1): fails the build if any MCP tool name or
+      # description carries a prompt-injection pattern.
+      - name: Scan MCP manifest for tool-description injection
+        run: python -m master.mcp.manifest_scan

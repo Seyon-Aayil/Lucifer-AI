@@ -54,6 +54,7 @@ class DockerTransport(MCPTransport):
         env_vars: dict[str, str] | None = None,
         host_port: int | None = None,
         timeout: float = 30.0,
+        require_digest: bool = False,
     ) -> None:
         """
         Args:
@@ -61,7 +62,15 @@ class DockerTransport(MCPTransport):
             env_vars: Environment variables injected into the container.
             host_port: Fixed host port mapping; auto-assigned if None.
             timeout: HTTP timeout for tool calls (seconds).
+            require_digest: When True, reject any image not pinned by @sha256:
+                digest (W3-2 rug-pull defence). A mutable tag like :latest can
+                be repointed at a malicious image after review.
         """
+        if require_digest and "@sha256:" not in image:
+            raise ValueError(
+                f"MCP image '{image}' must be pinned by @sha256: digest "
+                "(mcp_require_image_digest is on) — a mutable tag is a rug-pull risk."
+            )
         self._image = image
         self._env_vars: dict[str, str] = env_vars or {}
         self._host_port = host_port

@@ -3,6 +3,14 @@
 # Defines all MCP server configurations used by agents.
 # Each entry maps to an MCPServerConfig instance loaded at startup.
 # Allowed agents enforce the agent manifest ACL per tool.
+#
+# Supply chain (W3):
+#   * Every tool name + description is scanned for prompt-injection in CI
+#     (python -m master.mcp.manifest_scan — a required check).
+#   * docker_image SHOULD be pinned by @sha256: digest, not a mutable tag —
+#     e.g. lucifer/mcp-gmail@sha256:<hash>. Set mcp_require_image_digest=true to
+#     make DockerTransport reject un-pinned images. The :latest tags below are
+#     placeholders until the images are built and published with digests.
 # =============================================================================
 
 servers:

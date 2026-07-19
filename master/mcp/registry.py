@@ -143,6 +143,7 @@ class MCPServerRegistry:
             transports=self._transports,
             server_configs=self._configs,
             audit_logger=self._audit,
+            enforce_untrusted=get_settings().mcp_untrusted_result_enforcement,
         )
 
     @staticmethod
@@ -188,6 +189,7 @@ class MCPServerRegistry:
                 return DockerTransport(
                     image=config.docker_image,
                     env_vars=self._resolve_env(config.env_vars),
+                    require_digest=settings.mcp_require_image_digest,
                 )
             raise ValueError(
                 f"STDIO transport without docker_image is not permitted for '{config.server_id}'"

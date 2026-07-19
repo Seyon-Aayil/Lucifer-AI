@@ -90,7 +90,6 @@ class CodingAgent(BaseAgent):
         result = await self._mcp.invoke("github", "read_pr", {"query": request.raw_input})
         if not result.success:
             return HandlerResult(text=f"Failed to fetch PR: {result.error}")
-        pr_data: dict[str, Any] = result.output or {}
         context_summary = request.context_package.summary or ""
         messages = [
             Message(role="system", content=_SYSTEM_PROMPT),
@@ -98,7 +97,9 @@ class CodingAgent(BaseAgent):
                 role="user",
                 content=(
                     f"Context:\n{context_summary}\n\n"
-                    f"PR Data:\n{pr_data}\n\n"
+                    # Tool output is untrusted — wrap it so a crafted PR body
+                    # cannot inject instructions (W3-4).
+                    f"{result.as_untrusted_block()}\n\n"
                     f"Request: {request.raw_input}"
                 ),
             ),
@@ -123,12 +124,15 @@ class CodingAgent(BaseAgent):
         result = await self._mcp.invoke("github", "get_repo_summary", {"query": request.raw_input})
         if not result.success:
             return HandlerResult(text=f"Failed to fetch repo summary: {result.error}")
-        repo_data: dict[str, Any] = result.output or {}
         messages = [
             Message(role="system", content=_SYSTEM_PROMPT),
             Message(
                 role="user",
-                content=f"Summarise this repository:\n{repo_data}\n\nRequest: {request.raw_input}",
+                # Tool output is untrusted — delimit it (W3-4).
+                content=(
+                    f"Summarise this repository:\n{result.as_untrusted_block()}\n\n"
+                    f"Request: {request.raw_input}"
+                ),
             ),
         ]
         return await self._llm_complete(request, messages)

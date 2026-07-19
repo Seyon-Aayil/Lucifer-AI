@@ -117,6 +117,18 @@ class Settings(BaseSettings):
     vllm_base_url: str | None = None
     vllm_model: str | None = None
 
+    # ── MCP supply chain (W3) ──────────────────────────────────────────────
+    # Treat MCP tool results as untrusted: scan returned content for prompt-
+    # injection before it can re-enter a prompt. Log-and-flag by default — a
+    # false positive here would silently drop a legitimate result (e.g. an
+    # email), which is worse than the attack. Flip to enforce only after a
+    # 2-week observation window (ADR-003 / W3-3).
+    mcp_untrusted_result_enforcement: bool = False
+    # Require MCP Docker images to be pinned by @sha256: digest, not a mutable
+    # tag (rug-pull defence, W3-2). Off until the published images carry
+    # digests; the current manifest uses :latest placeholders.
+    mcp_require_image_digest: bool = False
+
     # ── Web Search MCP ─────────────────────────────────────────────────────
     # API key for the web-search MCP server's backend (Brave/Tavily/etc.),
     # injected via the server's env_vars (${web_search_api_key}).

@@ -13,6 +13,7 @@ from typing import Any
 
 import jsonschema
 
+from master.api.middleware.content_policy import ContentPolicyValidator
 from master.core.exceptions import (
     MCPPermissionError,
     MCPSchemaValidationError,
@@ -64,11 +65,18 @@ class MCPClient:
         transports: dict[str, MCPTransport],
         server_configs: dict[str, MCPServerConfig],
         audit_logger: AuditLogger,
+        content_policy: ContentPolicyValidator | None = None,
+        enforce_untrusted: bool = False,
     ) -> None:
         self._manifest = agent_manifest
         self._transports = transports
         self._configs = server_configs
         self._audit = audit_logger
+        # W3-3: tool results are untrusted input. Reuse the content-policy
+        # validator (it already carries the injection patterns — AGENTS.md rule
+        # 4: reuse, don't add a parallel component). enforce=False is log-and-flag.
+        self._content_policy = content_policy or ContentPolicyValidator()
+        self._enforce_untrusted = enforce_untrusted
         # Tool schema cache: {server_id: {tool_name: ToolSchema}}
         self._tool_cache: dict[str, dict[str, ToolSchema]] = {}
 
@@ -125,12 +133,22 @@ class MCPClient:
                 raw_output = await transport.call_tool(tool_name, input_data)
                 duration_ms = (time.monotonic() - start) * 1000
 
+                # ── Untrusted-result scan (W3-3) ─────────────────────────────
+                # A tool result is attacker-controllable (e.g. an email body or
+                # Notion page carrying "IGNORE PREVIOUS INSTRUCTIONS…"). Scan it
+                # before it can re-enter a prompt.
+                output, flagged, flag_reason = self._screen_result(server_id, tool_name, raw_output)
+
                 # ── Audit Log ────────────────────────────────────────────────
                 seq = await self._audit.log_event(
                     event_type="mcp.tool_call",
                     action=f"{server_id}.{tool_name}",
                     resource=server_id,
-                    payload={"tool": tool_name, "input_keys": list(input_data.keys())},
+                    payload={
+                        "tool": tool_name,
+                        "input_keys": list(input_data.keys()),
+                        "flagged": flagged,
+                    },
                     agent_id=self._manifest.agent_id,
                 )
 
@@ -141,15 +159,18 @@ class MCPClient:
                     agent=self._manifest.agent_id,
                     duration_ms=round(duration_ms, 1),
                     audit_seq=seq,
+                    flagged=flagged,
                 )
 
                 return ToolInvocationResult(
                     tool_name=tool_name,
                     server_id=server_id,
                     success=True,
-                    output=raw_output,
+                    output=output,
                     duration_ms=duration_ms,
                     audit_sequence=seq,
+                    flagged=flagged,
+                    flag_reason=flag_reason,
                 )
 
             except Exception as exc:
@@ -186,6 +207,37 @@ class MCPClient:
         if schema is None:
             raise MCPToolNotFoundError(f"Tool '{tool_name}' not found on server '{server_id}'")
         return schema
+
+    def _screen_result(
+        self, server_id: str, tool_name: str, raw_output: Any
+    ) -> tuple[Any, bool, str | None]:
+        """
+        Scan a tool result for prompt-injection (W3-3).
+
+        Returns (output, flagged, flag_reason). In log-and-flag mode the original
+        output is returned unchanged with flagged=True. In enforce mode the
+        offending content is replaced with a neutral placeholder so it can never
+        re-enter a prompt. Reuses ContentPolicyValidator's injection patterns.
+        """
+        result = self._content_policy.validate_input(str(raw_output))
+        if result.allowed:
+            return raw_output, False, None
+
+        reason = result.violation or "untrusted tool result flagged"
+        log.warning(
+            "mcp.tool.untrusted_flagged",
+            server=server_id,
+            tool=tool_name,
+            check=result.check,
+            enforce=self._enforce_untrusted,
+        )
+        if self._enforce_untrusted:
+            neutral = {
+                "error": "tool_result_blocked",
+                "reason": f"{server_id}.{tool_name} result blocked: {reason}",
+            }
+            return neutral, True, reason
+        return raw_output, True, reason
 
     def _validate_input(self, tool_schema: ToolSchema, input_data: dict[str, Any]) -> None:
         try:
