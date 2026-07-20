@@ -98,7 +98,9 @@ class Settings(BaseSettings):
     # and skip RouteLLM reclassification on later turns, so provider-side prompt
     # caches keyed to that model survive a follow-up ("thanks!") that would
     # otherwise route to a different tier and invalidate the cached prefix.
-    session_routing_affinity_enabled: bool = False
+    # Enabled by default — a pure cost win (cache preservation); the pin is
+    # TTL-bounded and dropped if the provider goes unhealthy or no longer fits.
+    session_routing_affinity_enabled: bool = True
     session_routing_affinity_ttl_seconds: int = 3600
 
     # ── PII cloud-dispatch gate (W1) ───────────────────────────────────────
