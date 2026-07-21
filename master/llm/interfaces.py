@@ -221,6 +221,25 @@ class LLMProvider(ABC):
     def max_context_tokens(self) -> int:
         """Maximum context window in tokens."""
 
+    @property
+    def cache_read_multiplier(self) -> float:
+        """
+        Cache-read price as a multiple of the base input rate. Defaults to
+        Anthropic's economics (0.1×); providers whose caching is priced
+        differently (e.g. Gemini ≈ 0.25×) override this.
+        """
+        return CACHE_READ_MULTIPLIER
+
+    @property
+    def cache_write_multiplier(self) -> float:
+        """
+        Cache-write (creation) price as a multiple of the base input rate.
+        Defaults to Anthropic's 1.25×. Providers without a per-token creation
+        premium (e.g. Gemini, whose cache cost is storage-over-time) override
+        this to 1.0.
+        """
+        return CACHE_WRITE_MULTIPLIER
+
     @abstractmethod
     async def complete(self, request: CompletionRequest) -> CompletionResponse:
         """

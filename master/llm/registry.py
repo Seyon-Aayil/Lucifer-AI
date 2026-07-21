@@ -376,9 +376,13 @@ class ProviderRegistry:
         """Record actual spend for a completed call, if a tracker is wired."""
         if spend_tracker and agent_id:
             # Route through TokenUsage.cost() so cache-read/write tokens are priced
-            # (0.1× / 1.25×) rather than billed at the full input rate.
+            # rather than billed at the full input rate — using this provider's own
+            # cache multipliers (Anthropic 0.1×/1.25×, Gemini ≈0.25×/1.0×).
             cost = response.token_usage.cost(
-                provider.cost_per_input_token, provider.cost_per_output_token
+                provider.cost_per_input_token,
+                provider.cost_per_output_token,
+                cache_read_multiplier=provider.cache_read_multiplier,
+                cache_write_multiplier=provider.cache_write_multiplier,
             )
             await spend_tracker.record_spend(agent_id, cost)
 
