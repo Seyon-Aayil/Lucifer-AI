@@ -101,7 +101,7 @@ dependencies = [
     # --- Utilities ---
     "python-dotenv>=1.0.1",
     "structlog>=24.2.0",
-    "tenacity>=8.3.0",          # Retry with backoff
+    "tenacity>=9.1.4",          # Retry with backoff
     "click>=8.1.7",
 ]
 
