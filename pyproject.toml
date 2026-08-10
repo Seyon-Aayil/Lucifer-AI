@@ -186,7 +186,7 @@ testpaths = ["master/tests"]
 # 61.5%, gate set to (measured − 2). It may be raised but never lowered; the
 # ratchet target is the 80% AGENTS.md already promises. Bump this as coverage
 # climbs — do not let it slip back toward the old placeholder floor.
-addopts = "--cov=master --cov-report=term-missing --cov-fail-under=59"
+addopts = "--cov=master --cov-report=term-missing --cov-fail-under=65"
 log_cli = true
 log_level = "INFO"
 markers = [
