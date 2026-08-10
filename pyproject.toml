@@ -93,7 +93,7 @@ dependencies = [
     # --- Sync ---
     "grpcio>=1.64.0",
     "grpcio-tools>=1.64.0",
-    "protobuf>=5.27.0",
+    "protobuf>=7.35.1",
 
     # --- Scheduling ---
     "apscheduler>=3.10.4",
